@@ -1,0 +1,64 @@
+[project]
+name = "EncoSimServer"
+version = "0.0.1"
+requires-python = ">=3.12"
+dependencies = [
+  "encosim",
+  "fastapi>=0.152.0",
+  "google-auth[requests]>=2.62.0",
+  "pydantic-settings>=2.16.1",
+  "pydantic[email,timezone]>=2.14.1",
+  "pyjwt>=2.15.1",
+  "pymongo>=4.19.0",
+  "ua-parser>=1.0.2",
+  "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+dev = "encosim_server.scripts.dev:main"
+main = "encosim_server.main:main"
+staging = "encosim_server.scripts.staging:main"
+
+[dependency-groups]
+dev = [
+  "asgi-lifespan>=2.1.0",
+  "httpx>=0.28.1",
+  "pre-commit>=4.7.0",
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest]
+log_cli = false
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# filterwarnings = [
+#   # mongomock still calls datetime.utcnow()
+#   "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:mongomock",
+# ]
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.uv.sources]
+encosim = { path = "../simulator" }
+
+[tool.uv.build-backend]
+module-name = "encosim_server"
+module-root = ""
