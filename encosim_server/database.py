@@ -45,7 +45,7 @@ async def health_check_mongo(settings: Settings, timeout: float = 5):
                     logger.info("Connected to MongoDB", res)
                     return
                 else:
-                    RuntimeError(f"Unexpected ping response from MongoDB: {res}")
+                    raise RuntimeError(f"Unexpected ping response from MongoDB: {res}")
     except PyMongoError as e:
         raise RuntimeError(f"Could not connect to MongoDB:\n{e}") from e
 
