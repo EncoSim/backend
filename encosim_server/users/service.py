@@ -5,10 +5,10 @@ from fastapi import HTTPException
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
+from encosim_server.auth.sessions import SessionService
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS, TOMBSTONES, USERS
-from encosim_server.services.sessions import SessionService
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus, UserProfile
 

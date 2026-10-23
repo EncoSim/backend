@@ -1,17 +1,15 @@
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 from ua_parser import parse
 
+from encosim_server.auth.exceptions import INVALID_SESSION
 from encosim_server.auth.schema import SessionSchema
 from encosim_server.core.security import new_refresh_token, split_refresh_token, utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
 from encosim_server.users.models import UserInDB
-
-INVALID = HTTPException(401, "invalid refresh token")
 
 
 class SessionService:
@@ -55,7 +53,7 @@ class SessionService:
         now = utcnow()
         parsed = split_refresh_token(refresh_token)
         if parsed is None:
-            raise INVALID
+            raise INVALID_SESSION
         session_id, old_hash = parsed
         new_token, new_hash = new_refresh_token(session_id)
         expires_at = now + self.settings.session_ttl
@@ -71,10 +69,10 @@ class SessionService:
             return_document=ReturnDocument.BEFORE,
         )
         if doc is None:  # no session
-            raise INVALID
+            raise INVALID_SESSION
         if doc.get("refresh_hash") != old_hash:  # wrong hash => reuse detected
             await self.terminate(session_id)
-            raise INVALID
+            raise INVALID_SESSION
         return new_token, doc["_id"], doc["user_id"]
 
     async def terminate(self, session_id: UUID) -> None:

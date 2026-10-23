@@ -27,6 +27,7 @@ import pytest
 import pytest_asyncio
 
 from encosim_server.auth.google import FakeGoogleVerifier
+from encosim_server.auth.sessions import SessionService
 from encosim_server.core import security
 from encosim_server.core.settings import Settings
 from encosim_server.database import (
@@ -38,8 +39,9 @@ from encosim_server.database import (
 )
 from encosim_server.main import preflight
 from encosim_server.resources import Resources, build_resources
-from encosim_server.services.sessions import SessionService
-from encosim_server.services.users import UserInDB, UserProfile, UserService
+from encosim_server.users.models import UserInDB
+from encosim_server.users.schemas import UserProfile
+from encosim_server.users.service import UserService
 from tests.helpers import CHROME_WIN
 
 ENV_FILE = Path(os.environ.get("TEST_ENV_FILE", Path(__file__).resolve().parents[1] / ".env.test"))
@@ -62,9 +64,7 @@ PINNED_SETTINGS = {
 @lru_cache
 def load_base_settings() -> Settings:
     if not ENV_FILE.is_file():
-        raise RuntimeError(
-            f"{ENV_FILE} not found: copy .env.test.example to .env.test and fill it in"
-        )
+        raise RuntimeError(f"{ENV_FILE} not found: add .env.test to the directory")
     settings = Settings(_env_file=ENV_FILE)  # type: ignore
 
     user = settings.mongo_user

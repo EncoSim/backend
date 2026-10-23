@@ -1,7 +1,8 @@
 from uuid import UUID
 
 from encosim_server.auth.schema import SessionSchema
-from encosim_server.services.users import UserProfile, UserService
+from encosim_server.users.schemas import UserProfile
+from encosim_server.users.service import UserService
 
 CHROME_WIN = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

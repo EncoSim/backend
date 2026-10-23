@@ -5,11 +5,11 @@ import pytest
 from fastapi import HTTPException
 
 from encosim_server.auth.schema import SessionSchema
+from encosim_server.auth.sessions import SessionService, get_session_info
 from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
-from encosim_server.services.sessions import get_session_info
-from encosim_server.services.users import SessionService, UserService
+from encosim_server.users.service import UserService
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, login, sessions_to_ids, tamper_refresh_token
 
 

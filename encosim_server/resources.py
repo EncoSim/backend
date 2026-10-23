@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.google import GoogleVerifier
+from encosim_server.auth.service import AuthService
+from encosim_server.auth.sessions import SessionService
 from encosim_server.core.settings import Settings
-from encosim_server.services.auth import AuthService
-from encosim_server.services.sessions import SessionService
-from encosim_server.services.users import UserService
+from encosim_server.users.service import UserService
 
 
 @dataclass

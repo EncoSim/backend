@@ -3,10 +3,10 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 
+from encosim_server.auth.sessions import SessionService
 from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
-from encosim_server.services.sessions import SessionService
-from encosim_server.services.users import UserService
 from encosim_server.users.schemas import BanStatus, UserProfile
+from encosim_server.users.service import UserService
 from tests.helpers import CHROME_WIN, login, sessions_to_ids
 
 # --- upsert_login ------------------------------------------------------------------
