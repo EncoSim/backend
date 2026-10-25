@@ -6,6 +6,7 @@ dependencies = [
   "encosim",
   "fastapi>=0.152.0",
   "fastapi-docs-exception>=0.4.3",
+  "fastapi-typed-errors>=1.0.1",
   "google-auth[requests]>=2.62.0",
   "pydantic-settings>=2.16.1",
   "pydantic[email,timezone]>=2.14.1",

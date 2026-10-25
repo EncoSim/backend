@@ -7,6 +7,7 @@ from typing import TypedDict
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi_typed_errors import BaseError, handle_base_error
 from uvicorn.logging import DefaultFormatter
 
 from encosim_server.auth.google import GoogleVerifier, RealGoogleVerifier
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
             yield AppState(resources=build_resources(settings, google, mongo))
 
     app = FastAPI(lifespan=lifespan)
+    app.add_exception_handler(BaseError, handle_base_error)
     return app
 
 

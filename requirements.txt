@@ -315,10 +315,16 @@ email-validator==2.3.0 \
 fastapi==0.162.0 \
     --hash=sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c \
     --hash=sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f
-    # via encosimserver
+    # via
+    #   encosimserver
+    #   fastapi-typed-errors
 fastapi-docs-exception==0.4.3 \
     --hash=sha256:c7897236d132a5e25a1e0486a1ed271dd84732724e207bfd072f96d90ad870d8 \
     --hash=sha256:e8b7cfed79b244a63e5a50a255dd98601dece89983e87e0cd6309f47a4a92e56
+    # via encosimserver
+fastapi-typed-errors==1.0.1 \
+    --hash=sha256:4f7e5a51f42f4daaa45893cdd1ae4004c348ffeb8f9bb60e56e8329dc4f3f356 \
+    --hash=sha256:5fd6112421a99e6738357ac9aeb573954154ffe2479e0f42062606734c8df9e8
     # via encosimserver
 filelock==4.2.4 \
     --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
@@ -516,6 +522,7 @@ pydantic==2.14.1 \
     # via
     #   encosimserver
     #   fastapi
+    #   fastapi-typed-errors
     #   pydantic-settings
 pydantic-core==2.50.1 \
     --hash=sha256:0036473f5583e6a60e50b8b21651511564277a3f05cc5dab8cf579f552cd5f6c \
