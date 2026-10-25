@@ -10,7 +10,7 @@ from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
 from encosim_server.users.service import UserService
-from tests.helpers import CHROME_WIN, FIREFOX_LINUX, login, sessions_to_ids, tamper_refresh_token
+from tests.helpers import CHROME_WIN, FIREFOX_LINUX, ids_from_sessions, login, tamper_refresh_token
 
 
 def assert_invalid(exc_info):
@@ -208,7 +208,7 @@ async def test_terminate_removes_only_that_session(users: UserService, sessions:
 
     await sessions.terminate(a)
 
-    assert sessions_to_ids(await sessions.list_user_session(user.user_id)) == {b}
+    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {b}
 
 
 async def test_terminate_unknown_session_is_a_noop(users: UserService, sessions: SessionService):
@@ -223,10 +223,10 @@ async def test_terminate_by_token_requires_the_current_token(
     current, _, _ = await sessions.rotate(old)
 
     await sessions.terminate_by_token(old)  # stale token: ignored
-    assert sessions_to_ids(await sessions.list_user_session(user.user_id)) == {sid}
+    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {sid}
 
     await sessions.terminate_by_token(tamper_refresh_token(current))  # wrong secret: ignored
-    assert sessions_to_ids(await sessions.list_user_session(user.user_id)) == {sid}
+    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {sid}
 
     await sessions.terminate_by_token(current)
     assert await sessions.list_user_session(user.user_id) == []
@@ -246,7 +246,7 @@ async def test_terminate_for_user_checks_ownership(users: UserService, sessions:
     _, alice_session = await sessions.create(alice, CHROME_WIN)
 
     assert await sessions.terminate_for_user(bob.user_id, alice_session) is False
-    assert sessions_to_ids(await sessions.list_user_session(alice.user_id)) == {alice_session}
+    assert ids_from_sessions(await sessions.list_user_session(alice.user_id)) == {alice_session}
 
     assert await sessions.terminate_for_user(alice.user_id, alice_session) is True
     assert await sessions.terminate_for_user(alice.user_id, alice_session) is False  # already gone
@@ -266,7 +266,7 @@ async def test_terminate_all_for_user_leaves_other_users_alone(
     await sessions.terminate_all_for_user(alice.user_id)
 
     assert await sessions.list_user_session(alice.user_id) == []
-    assert sessions_to_ids(await sessions.list_user_session(bob.user_id)) == {bobs}
+    assert ids_from_sessions(await sessions.list_user_session(bob.user_id)) == {bobs}
 
 
 # --- list_user_session ------------------------------------------------------------------

@@ -40,6 +40,7 @@ class AuthService:
         return LoginResult(user, self._new_access(user, sid), refresh)
 
     async def refresh(self, refresh_token: str) -> LoginResult:
+        """refresh the login session"""
         new_refresh, session_id, user_id = await self.sessions.rotate(refresh_token)
         user = await self.users.get(user_id)
         if not user or user.ban_status.banned:
@@ -48,6 +49,6 @@ class AuthService:
         return LoginResult(user, self._new_access(user, session_id), new_refresh)
 
     async def logout(self, refresh_token: str | None) -> None:
-        """Idempotent. Uses the refresh cookie so it works with an expired access token."""
+        """Silent on failure. Uses the refresh cookie so it works with an expired access token."""
         if refresh_token:
             await self.sessions.terminate_by_token(refresh_token)

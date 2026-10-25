@@ -161,13 +161,23 @@ def resources(db, settings) -> Resources:
 
 
 @pytest.fixture
-def users(resources: Resources) -> UserService:
+def users(resources: Resources):
     return resources.users
 
 
 @pytest.fixture
-def sessions(resources: Resources) -> SessionService:
+def sessions(resources: Resources):
     return resources.sessions
+
+
+@pytest.fixture
+def auth(resources: Resources):
+    return resources.auth
+
+
+@pytest.fixture
+def characters(resources: Resources):
+    return resources.characters
 
 
 # --- endpoints (httpx) ----------------------------------------------------------------------------

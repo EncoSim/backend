@@ -11,7 +11,7 @@ CHROME_WIN = (
 FIREFOX_LINUX = "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0"
 
 
-def sessions_to_ids(sessions: list[SessionSchema]) -> set[UUID]:
+def ids_from_sessions(sessions: list[SessionSchema]) -> set[UUID]:
     return {s.session_id for s in sessions}
 
 

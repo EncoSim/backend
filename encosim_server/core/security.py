@@ -2,11 +2,11 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import jwt
-from pydantic import AwareDatetime, BaseModel, ValidationError
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ValidationError
 
 from encosim_server.core.settings import Settings
 
@@ -25,8 +25,8 @@ def as_utc(dt: datetime) -> datetime:
 
 
 class AccessTokenClaims(BaseModel):
-    sub: UUID
-    sid: UUID
+    sub: Annotated[UUID, BeforeValidator(lambda x: UUID(hex=x))]
+    sid: Annotated[UUID, BeforeValidator(lambda x: UUID(hex=x))]
     typ: Literal["access"]
     iat: AwareDatetime
     exp: AwareDatetime
@@ -39,15 +39,14 @@ def create_access_token(
     session_id: UUID,
 ) -> str:
     now = utcnow()
-    claims = AccessTokenClaims(
-        sub=user_id,
-        sid=session_id,
-        typ="access",
-        iat=now,
-        exp=now + settings.jwt_access_ttl,
-    )
     return jwt.encode(
-        claims.model_dump(),
+        {
+            "sub": user_id.hex,
+            "sid": session_id.hex,
+            "typ": "access",
+            "iat": now,
+            "exp": now + settings.jwt_access_ttl,
+        },
         settings.jwt_access_key.get_secret_value(),
         algorithm=settings.jwt_alg,
     )

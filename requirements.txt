@@ -21,9 +21,9 @@ anyio==4.15.1 \
 asgi-lifespan==2.1.0 \
     --hash=sha256:5e2effaf0bfe39829cf2d64e7ecc47c7d86d676a6599f7afba378c31f5e3a308 \
     --hash=sha256:ed840706680e28428c01e14afb3875d7d76d3206f3d5b2f2294e059b5c23804f
-certifi==2026.10.19 \
-    --hash=sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae \
-    --hash=sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b
+certifi==2026.10.23 \
+    --hash=sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd \
+    --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
     # via
     #   httpcore
     #   httpx
@@ -312,9 +312,13 @@ email-validator==2.3.0 \
     --hash=sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4 \
     --hash=sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426
     # via pydantic
-fastapi==0.159.1 \
-    --hash=sha256:49b94c29afec2fca1390e9c39be202c59755d5cda8e4f1148a133761e4313e7e \
-    --hash=sha256:b45b1ec57f3aa4d2f80f09bfbcf068b46764a2ee892e56753f35bb3d9d845ce2
+fastapi==0.162.0 \
+    --hash=sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c \
+    --hash=sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f
+    # via encosimserver
+fastapi-docs-exception==0.4.3 \
+    --hash=sha256:c7897236d132a5e25a1e0486a1ed271dd84732724e207bfd072f96d90ad870d8 \
+    --hash=sha256:e8b7cfed79b244a63e5a50a255dd98601dece89983e87e0cd6309f47a4a92e56
     # via encosimserver
 filelock==4.2.4 \
     --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \

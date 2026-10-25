@@ -14,7 +14,9 @@ def string_to_bool(s) -> bool:
 
 
 class GoogleVerifier(Protocol):
-    async def verify(self, id_token: str) -> tuple[str, UserProfile]: ...
+    async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+        """Returns (login id, user profile)"""
+        ...
 
 
 class RealGoogleVerifier:
@@ -22,6 +24,7 @@ class RealGoogleVerifier:
         self.client_id = client_id
 
     async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+        """Returns (login id, user profile)"""
         try:
             # google api is blocking
             info = await asyncio.to_thread(
@@ -39,13 +42,14 @@ class RealGoogleVerifier:
             email_verified=string_to_bool(info.get("email_verified")),
             picture=info.get("picture"),
         )
-        return info["sub"], profile
+        return "google:" + info["sub"], profile
 
 
 class FakeGoogleVerifier:
     """For test/demo. Token format: 'fake:<sub>:<email>[:<name>]'."""
 
     async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+        """Returns (login id, user profile)"""
         parts = id_token.split(":")
         if len(parts) < 3 or parts[0] != "fake":
             raise HTTPException(401, "invalid google token")
@@ -56,4 +60,4 @@ class FakeGoogleVerifier:
             name=parts[3] if len(parts) > 3 else parts[1],
             picture=None,
         )
-        return parts[1], profile
+        return "google:" + parts[1], profile
