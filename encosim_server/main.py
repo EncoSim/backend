@@ -12,6 +12,7 @@ from fastapi_typed_errors import BaseError, handle_base_error
 from uvicorn.logging import DefaultFormatter
 
 from encosim_server.auth.google import GoogleVerifier, RealGoogleVerifier
+from encosim_server.auth.router import router
 from encosim_server.core.settings import Settings, warn_on_insecure_settings
 from encosim_server.database import connect_mongo, health_check_mongo
 from encosim_server.resources import Resources, build_resources
@@ -52,6 +53,7 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
         warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
         app = FastAPI(lifespan=lifespan, debug=True, root_path="/api")
     app.add_exception_handler(BaseError, handle_base_error)
+    app.include_router(router)
     return app
 
 
