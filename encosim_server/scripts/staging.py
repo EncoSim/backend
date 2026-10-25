@@ -21,7 +21,6 @@ def main():
         reload_includes=[ENV_FP],
         host="0.0.0.0",
         port=8001,
-        root_path="/api",
     )
 
 

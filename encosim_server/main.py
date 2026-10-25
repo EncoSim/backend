@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TypedDict
@@ -46,7 +47,10 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
         async with connect_mongo(settings) as mongo:
             yield AppState(resources=build_resources(settings, google, mongo))
 
-    app = FastAPI(lifespan=lifespan)
+    # using uvicorn's root_path causes double prefixes, which breaks docs
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
+        app = FastAPI(lifespan=lifespan, debug=True, root_path="/api")
     app.add_exception_handler(BaseError, handle_base_error)
     return app
 
@@ -73,7 +77,6 @@ def main():
         host="0.0.0.0",
         port=8000,
         workers=4,
-        root_path="/api",
     )
 
 

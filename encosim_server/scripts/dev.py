@@ -26,7 +26,6 @@ def main():
         reload_delay=2,
         host="localhost",
         port=8000,
-        root_path="/api",
     )
 
 
