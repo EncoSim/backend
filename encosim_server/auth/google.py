@@ -1,11 +1,12 @@
 import asyncio
-from typing import Protocol
+from typing import Annotated, Protocol
 
-from fastapi import HTTPException
+from fastapi_typed_errors import Raises
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests as g_requests
 from google.oauth2 import id_token as g_id_token
 
+from encosim_server.core import exceptions
 from encosim_server.users.schemas import UserProfile
 
 
@@ -14,7 +15,9 @@ def string_to_bool(s) -> bool:
 
 
 class GoogleVerifier(Protocol):
-    async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+    async def verify(
+        self, id_token: str
+    ) -> Annotated[tuple[str, UserProfile], Raises[exceptions.InvalidGoogleToken]]:
         """Returns (login id, user profile)"""
         ...
 
@@ -23,7 +26,9 @@ class RealGoogleVerifier:
     def __init__(self, client_id: str):
         self.client_id = client_id
 
-    async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+    async def verify(
+        self, id_token: str
+    ) -> Annotated[tuple[str, UserProfile], Raises[exceptions.InvalidGoogleToken]]:
         """Returns (login id, user profile)"""
         try:
             # google api is blocking
@@ -35,7 +40,7 @@ class RealGoogleVerifier:
                 )
             )
         except (ValueError, GoogleAuthError):
-            raise HTTPException(401, "invalid google token") from None
+            raise exceptions.InvalidGoogleToken() from None
         profile = UserProfile(
             name=info.get("name"),
             email=info.get("email"),
@@ -48,11 +53,13 @@ class RealGoogleVerifier:
 class FakeGoogleVerifier:
     """For test/demo. Token format: 'fake:<sub>:<email>[:<name>]'."""
 
-    async def verify(self, id_token: str) -> tuple[str, UserProfile]:
+    async def verify(
+        self, id_token: str
+    ) -> Annotated[tuple[str, UserProfile], Raises[exceptions.InvalidGoogleToken]]:
         """Returns (login id, user profile)"""
         parts = id_token.split(":")
         if len(parts) < 3 or parts[0] != "fake":
-            raise HTTPException(401, "invalid google token")
+            raise exceptions.InvalidGoogleToken()
 
         profile = UserProfile(
             email=parts[2],

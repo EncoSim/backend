@@ -1,9 +1,9 @@
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import HTTPException
 
 from encosim_server.auth.sessions import SessionService
+from encosim_server.core import exceptions
 from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
 from encosim_server.users.schemas import BanStatus, UserProfile
 from encosim_server.users.service import UserService
@@ -86,10 +86,8 @@ async def test_banned_user_cannot_log_in(users: UserService):
     user = await login(users)
     assert await users.ban(user.user_id, "spam")
 
-    with pytest.raises(HTTPException) as exc:
-        res = await login(users)
-        print(res)
-    assert exc.value.status_code == 403
+    with pytest.raises(exceptions.Banned):
+        await login(users)
 
 
 async def test_tombstoned_identity_cannot_log_in(users: UserService, db):
@@ -97,9 +95,9 @@ async def test_tombstoned_identity_cannot_log_in(users: UserService, db):
         {"_id": "google:alice", "ban_status": BanStatus(banned=True, number=1).model_dump()}
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.Banned):
         await login(users)
-    assert exc.value.status_code == 403
+
     assert await db[USERS].count_documents({}) == 0
 
 
@@ -235,6 +233,6 @@ async def test_deleting_a_banned_user_blocks_the_identity(users: UserService, db
     assert ban.reason == "spam"
     assert ban.number == 1
     assert ban.banned_at == clock()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.Banned):
         await login(users)  # cannot evade the ban by deleting and re-registering
-    assert exc.value.status_code == 403
+

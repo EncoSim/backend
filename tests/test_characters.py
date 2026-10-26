@@ -8,7 +8,6 @@ ADAPT: `upload()` builds a CharUpload. I only know that the schema has `data` an
 """
 
 import asyncio
-import json
 import logging
 from uuid import UUID, uuid4
 
@@ -17,8 +16,9 @@ from encosim.core.entity_config import create_default
 from fastapi import HTTPException
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.characters.schema import CharUpload
+from encosim_server.characters.schema import CharDownload, CharUpload
 from encosim_server.characters.service import CharacterService
+from encosim_server.core import exceptions
 from encosim_server.database import CHARACTERS
 
 
@@ -83,16 +83,14 @@ async def test_get_returns_the_owners_character(characters: CharacterService, al
 
 
 async def test_get_unknown_character_is_404(characters: CharacterService, alice):
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.NotFound):
         await characters.get(uuid4(), alice)
-    assert exc.value.status_code == 404
 
 
 async def test_get_someone_elses_character_is_404(characters: CharacterService, alice, bob):
     char = await characters.create(alice, create_payload())
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.NotFound):
         await characters.get(char.char_id, bob)
-    assert exc.value.status_code == 404
 
 
 # --- list / count ------------------------------------------------------------------------------
@@ -193,10 +191,9 @@ async def test_update_with_a_stale_version_conflicts_and_changes_nothing(
     char = await characters.create(alice, create_payload(hp=1))
     winner = await characters.update(char.char_id, alice, create_payload(hp=2, version=0))
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.CharacterOutdated):
         await characters.update(char.char_id, alice, create_payload(hp=3, version=0))  # stale
 
-    assert exc.value.status_code == 409
     current = await characters.get(char.char_id, alice)
     assert current.version == 1
     assert current.data == winner.data  # the stale write was dropped
@@ -206,13 +203,11 @@ async def test_conflict_reports_the_current_server_state(characters: CharacterSe
     char = await characters.create(alice, create_payload(hp=1))
     await characters.update(char.char_id, alice, create_payload(hp=4242, version=0))
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.CharacterOutdated) as exc:
         await characters.update(char.char_id, alice, create_payload(hp=2, version=0))
-
-    # TODO: fix error reporting with new http exception model
-    body = json.dumps(exc.value.detail)  # this is what the HTTP layer does with it
-    assert "4242" in body  # the client gets the winning data ...
-    assert '"version": 1' in body  # ... and the version to base its next attempt on
+    corrected: CharDownload = exc.value.to_response().correct_version
+    assert corrected.version == 1
+    assert corrected.data.health.hit_points == 4242  # change was rejected
 
 
 async def test_concurrent_updates_with_the_same_version_only_one_wins(
@@ -236,7 +231,7 @@ async def test_concurrent_updates_with_the_same_version_only_one_wins(
 
 
 async def test_update_unknown_character_is_404_not_409(characters: CharacterService, alice):
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.NotFound) as exc:
         await characters.update(uuid4(), alice, create_payload())
     assert exc.value.status_code == 404
 
@@ -244,10 +239,9 @@ async def test_update_unknown_character_is_404_not_409(characters: CharacterServ
 async def test_cannot_update_someone_elses_character(characters: CharacterService, alice, bob):
     char = await characters.create(alice, create_payload(hp=1))
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.NotFound):
         await characters.update(char.char_id, bob, create_payload(hp=6, version=0))
 
-    assert exc.value.status_code == 404  # same answer as for a missing id: no information leak
     untouched = await characters.get(char.char_id, alice)
     assert untouched.version == 0
     assert untouched.data == char.data
@@ -272,16 +266,14 @@ async def test_delete_unknown_or_already_deleted_character_is_404(
     await characters.delete(char.char_id, alice)
 
     for char_id in (char.char_id, uuid4()):
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(exceptions.NotFound):
             await characters.delete(char_id, alice)
-        assert exc.value.status_code == 404
 
 
 async def test_cannot_delete_someone_elses_character(characters: CharacterService, alice, bob):
     char = await characters.create(alice, create_payload())
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.NotFound):
         await characters.delete(char.char_id, bob)
 
-    assert exc.value.status_code == 404
     assert (await characters.get(char.char_id, alice)).char_id == char.char_id

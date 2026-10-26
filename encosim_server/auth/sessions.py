@@ -1,11 +1,13 @@
+from typing import Annotated
 from uuid import UUID, uuid4
 
+from fastapi_typed_errors import Raises
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 from ua_parser import parse
 
-from encosim_server.auth.exceptions import INVALID_SESSION
 from encosim_server.auth.schema import SessionSchema
+from encosim_server.core import exceptions
 from encosim_server.core.security import new_refresh_token, split_refresh_token, utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
@@ -45,7 +47,9 @@ class SessionService:
         for doc in await cursor.to_list(length=None):
             await self.terminate(doc["_id"])
 
-    async def rotate(self, refresh_token: str) -> tuple[str, UUID, UUID]:
+    async def rotate(
+        self, refresh_token: str
+    ) -> Annotated[tuple[str, UUID, UUID], Raises[exceptions.InvalidSession]]:
         """Swap the refresh token for a new one. Returns (new refresh token, session id, user id).
 
         TODO: optional grace window for legitimate concurrent refreshes.
@@ -53,7 +57,7 @@ class SessionService:
         now = utcnow()
         parsed = split_refresh_token(refresh_token)
         if parsed is None:
-            raise INVALID_SESSION
+            raise exceptions.InvalidSession()
         session_id, old_hash = parsed
         new_token, new_hash = new_refresh_token(session_id)
         expires_at = now + self.settings.session_ttl
@@ -69,10 +73,10 @@ class SessionService:
             return_document=ReturnDocument.BEFORE,
         )
         if doc is None:  # no session
-            raise INVALID_SESSION
+            raise exceptions.InvalidSession()
         if doc.get("refresh_hash") != old_hash:  # wrong hash => reuse detected
             await self.terminate(session_id)
-            raise INVALID_SESSION
+            raise exceptions.InvalidSession()
         return new_token, doc["_id"], doc["user_id"]
 
     async def terminate(self, session_id: UUID) -> None:

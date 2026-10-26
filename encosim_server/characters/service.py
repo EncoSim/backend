@@ -1,9 +1,9 @@
 import logging
-from typing import TypeVar
+from typing import Annotated, TypeVar
 from uuid import UUID, uuid4
 
 from encosim.components.shape_changing_component import BaseModel
-from fastapi import HTTPException
+from fastapi_typed_errors import Raises
 from pydantic import ValidationError
 from pymongo import ReturnDocument
 from pymongo.asynchronous.cursor import AsyncCursor
@@ -11,24 +11,24 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.characters.models import CharInDB
 from encosim_server.characters.schema import CharDownload, CharUpload
+from encosim_server.core import exceptions
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS
 
 logger = logging.getLogger(__name__)
 
-MISSING = HTTPException(404, "character not found")
-
-
 class CharacterService:
     def __init__(self, settings: Settings, db: AsyncDatabase) -> None:
         self.settings = settings
         self.chars = db[CHARACTERS]
 
-    async def get(self, char_id: UUID, owner_id: UUID):
+    async def get(
+        self, char_id: UUID, owner_id: UUID
+    ) -> Annotated[CharInDB, Raises[exceptions.NotFound]]:
         doc = await self.chars.find_one({"_id": char_id, "owner_id": owner_id})
         if doc is None:
-            raise MISSING
+            raise exceptions.NotFound()
         return CharInDB.model_validate(doc)
 
     # TODO: step-wise queries
@@ -64,7 +64,9 @@ class CharacterService:
         await self.chars.insert_one(char.model_dump(by_alias=True))
         return char
 
-    async def update(self, char_id: UUID, owner_id: UUID, payload: CharUpload):
+    async def update(
+        self, char_id: UUID, owner_id: UUID, payload: CharUpload
+    ) -> Annotated[CharInDB, Raises[exceptions.NotFound, exceptions.CharacterOutdated]]:
         doc = await self.chars.find_one_and_update(
             {"_id": char_id, "owner_id": owner_id, "version": payload.version},
             {
@@ -83,9 +85,11 @@ class CharacterService:
         real = await self.get(char_id, owner_id)
         # TODO: how to document errors cleanly?
         payload = CharDownload.model_validate(real, from_attributes=True)
-        raise HTTPException(409, payload.model_dump(mode="json"))
+        raise exceptions.CharacterOutdated(payload)
 
-    async def delete(self, char_id: UUID, owner_id: UUID):
+    async def delete(
+        self, char_id: UUID, owner_id: UUID
+    ) -> Annotated[None, Raises[exceptions.NotFound]]:
         res = await self.chars.delete_one({"_id": char_id, "owner_id": owner_id})
         if res.deleted_count == 0:
-            raise MISSING
+            raise exceptions.NotFound()

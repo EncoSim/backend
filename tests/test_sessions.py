@@ -2,10 +2,11 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import HTTPException
+from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.schema import SessionSchema
 from encosim_server.auth.sessions import SessionService, get_session_info
+from encosim_server.core import exceptions
 from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
@@ -141,12 +142,12 @@ async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
     old, sid = await sessions.create(user, CHROME_WIN)
     new, _, _ = await sessions.rotate(old)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession) as exc:
         await sessions.rotate(old)  # replay of the previous token
     assert_invalid(exc)
 
     assert await sessions.list_user_session(user.user_id) == []
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession) as exc:
         await sessions.rotate(new)  # the legitimate holder is logged out too
     assert_invalid(exc)
 
@@ -157,28 +158,26 @@ async def test_wrong_secret_is_rejected_and_kills_the_session(
     user = await login(users)
     token, _ = await sessions.create(user, CHROME_WIN)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await sessions.rotate(tamper_refresh_token(token))
-    assert_invalid(exc)
+
     assert await sessions.list_user_session(user.user_id) == []
 
 
-# @pytest.mark.parametrize("garbage", ["", "garbage", "no-dot-here", "....", "not-a-uuid.secret"])
-# async def test_malformed_token_is_rejected(sessions: SessionService, garbage):
-#     with pytest.raises(HTTPException) as exc:
-#         await sessions.rotate(garbage)
-#     assert_invalid(exc)
+@pytest.mark.parametrize("garbage", ["", "garbage", "no-dot-here", "....", "not-a-uuid.secret"])
+async def test_malformed_token_is_rejected(sessions: SessionService, garbage):
+    with pytest.raises(exceptions.InvalidSession):
+        await sessions.rotate(garbage)
 
 
 async def test_token_for_unknown_session_is_rejected(sessions: SessionService):
     token, _ = new_refresh_token(uuid4())
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await sessions.rotate(token)
-    assert_invalid(exc)
 
 
 async def test_expired_session_cannot_be_rotated(
-    users: UserService, sessions: SessionService, db, clock, disable_ttl_cleanup
+    users: UserService, sessions: SessionService, db: AsyncDatabase, clock, disable_ttl_cleanup
 ):
     """Mongo's TTL monitor only runs about once a minute, so expired documents can linger.
 
@@ -190,9 +189,9 @@ async def test_expired_session_cannot_be_rotated(
     expired = clock() - timedelta(minutes=1)
     await db[SESSIONS].update_one({"_id": sid}, {"$set": {"expires_at": expired}})
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await sessions.rotate(token)
-    assert_invalid(exc)
+
     doc = await db[SESSIONS].find_one({"_id": sid})
     assert doc is not None
     assert doc["expires_at"] == expired  # and it was not extended

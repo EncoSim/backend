@@ -1,16 +1,18 @@
 import hashlib
+from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException
+from fastapi_typed_errors import Raises
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.sessions import SessionService
+from encosim_server.core import exceptions
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS, TOMBSTONES, USERS
 from encosim_server.users.models import UserInDB
-from encosim_server.users.schemas import BanStatus, UserProfile
+from encosim_server.users.schemas import UserProfile
 
 
 def identity_hash(sub: str) -> str:
@@ -31,14 +33,16 @@ class UserService:
         if raw:
             return UserInDB.model_validate(raw)
 
-    async def upsert_login(self, login_id: str, profile: UserProfile) -> UserInDB:
+    async def upsert_login(
+        self, login_id: str, profile: UserProfile
+    ) -> Annotated[UserInDB, Raises[exceptions.Banned]]:
         """Find or create the user for a verified identity
 
         Assumes `login_id` belongs to an authorized party!
         """
         res = await self.tombstones.find_one({"_id": login_id})
         if res:
-            raise HTTPException(403, BanStatus.model_validate(res["ban_status"]))
+            raise exceptions.Banned()
 
         is_admin = (
             profile.email_verified
@@ -67,7 +71,7 @@ class UserService:
         )
         user = UserInDB.model_validate(raw)
         if user.ban_status.banned:
-            raise HTTPException(403, user.ban_status)
+            raise exceptions.Banned()
         return user
 
     async def ban(self, user_id: UUID, reason: str) -> bool:

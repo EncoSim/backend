@@ -8,12 +8,11 @@ Everything marked ADAPT depends on code I have not seen:
 """
 
 import pytest
-from fastapi import HTTPException
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.auth.exceptions import INVALID_SESSION
 from encosim_server.auth.service import AuthService
 from encosim_server.auth.sessions import SessionService
+from encosim_server.core import exceptions
 from encosim_server.core.security import decode_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
@@ -31,13 +30,6 @@ def fake_token(sub: str = "alice") -> str:
 
 async def login(auth: AuthService, sub: str = "alice", user_agent: str | None = CHROME_WIN):
     return await auth.login_google(fake_token(sub), user_agent)
-
-
-def assert_session_invalid(exc_info) -> None:
-    """The error the frontend branches on ("log in again"), not just any 401."""
-    assert exc_info.value.status_code == INVALID_SESSION.status_code
-    assert exc_info.value.detail == INVALID_SESSION.detail
-
 
 # --- login_google ---------------------------------------------------------------------------------
 
@@ -88,10 +80,8 @@ async def test_different_google_accounts_are_different_users(auth: AuthService):
 
 
 async def test_invalid_google_token_creates_nothing(auth: AuthService, db: AsyncDatabase):
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidGoogleToken):
         await auth.login_google("not-a-valid-token", CHROME_WIN)
-
-    assert exc.value.status_code == 401
     assert await db[USERS].count_documents({}) == 0
     assert await db[SESSIONS].count_documents({}) == 0
 
@@ -102,10 +92,9 @@ async def test_banned_user_cannot_log_in(
     result = await login(auth)
     await users.ban(result.user.user_id, "spam")
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.Banned):
         await login(auth)
 
-    assert exc.value.status_code == 403
     assert await sessions.list_user_session(result.user.user_id) == []  # no new session either
 
 
@@ -140,21 +129,18 @@ async def test_replaying_the_old_refresh_token_fails_and_ends_the_session(
     first = await login(auth)
     refreshed = await auth.refresh(first.refresh_token)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(first.refresh_token)  # replay
-    assert exc.value.status_code == 401
 
     assert await sessions.list_user_session(first.user.user_id) == []
-    with pytest.raises(HTTPException):
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(refreshed.refresh_token)  # the legitimate holder is logged out too
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "not-a-uuid.secret"])
 async def test_refresh_with_a_garbage_token_is_rejected(auth: AuthService, garbage):
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(garbage)
-
-    assert exc.value.status_code == 401
 
 
 async def test_refreshing_one_session_does_not_touch_the_others(
@@ -178,10 +164,9 @@ async def test_banned_user_cannot_refresh_and_loses_all_sessions(
     # flag the user directly: users.ban() would already end the sessions, hiding this code path
     await db[USERS].update_one({"_id": user_id}, {"$set": {"ban_status.banned": True}})  # ADAPT
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(laptop.refresh_token)
 
-    assert_session_invalid(exc)
     assert await sessions.list_user_session(user_id) == []
 
 
@@ -191,7 +176,7 @@ async def test_banning_through_the_user_service_stops_refresh(
     first = await login(auth)
     await users.ban(first.user.user_id, "spam")
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession) as exc:
         await auth.refresh(first.refresh_token)
 
     assert exc.value.status_code == 401
@@ -203,10 +188,9 @@ async def test_refresh_for_a_vanished_user_is_rejected_and_cleans_up(
     first = await login(auth)
     await db[USERS].delete_one({"_id": first.user.user_id})  # user gone, session left behind
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(first.refresh_token)
 
-    assert_session_invalid(exc)
     assert await sessions.list_user_session(first.user.user_id) == []
 
 
@@ -229,9 +213,8 @@ async def test_logout_ends_the_session(auth: AuthService, sessions: SessionServi
     await auth.logout(result.refresh_token)
 
     assert await sessions.list_user_session(result.user.user_id) == []
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(exceptions.InvalidSession):
         await auth.refresh(result.refresh_token)
-    assert exc.value.status_code == 401
 
 
 async def test_logout_leaves_other_sessions_alone(auth: AuthService, sessions: SessionService):

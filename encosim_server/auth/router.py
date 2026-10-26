@@ -4,11 +4,12 @@ from fastapi import APIRouter
 from fastapi_typed_errors import Raises, with_errors
 
 from encosim_server.core import exceptions
-from encosim_server.users.schemas import BanStatus
 
 router = with_errors(APIRouter())
 
+def func() -> Annotated[None, Raises[exceptions.CharacterOutdated]]:
+    raise exceptions.CharacterOutdated()
 
 @router.get("/error")
-async def _() -> Annotated[None, Raises[exceptions.Banned]]:
-    raise exceptions.Banned(attachment=BanStatus(banned=True))
+async def _() -> Annotated[None, Raises[exceptions.CharacterOutdated]]:
+    func()
