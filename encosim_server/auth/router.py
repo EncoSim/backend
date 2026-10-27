@@ -36,8 +36,12 @@ async def login_google(res: ResourcesDep, token: GoogleLoginInSchema, request: R
     set_refresh_cookie(request, response, res.settings, login_result.refresh_token)
     return response
 
-
-@router.post("/refresh", response_model=LoginOutSchema, description="get a new access token")
+@router.post(
+    "/refresh",
+    response_model=LoginOutSchema,
+    responses=errors.to_responses(errors.InvalidSession),
+    description="get a new access token",
+)
 async def refresh(res: ResourcesDep, request: Request):
     refresh_token = request.cookies.get(res.settings.cookie_name)
     if refresh_token is None:
@@ -61,20 +65,23 @@ async def logout(res: ResourcesDep, request: Request, response: Response):
     clear_refresh_cookie(request, response, res.settings)
 
 
-@router.get("/sessions")
+COMMON = (errors.InvalidSession, errors.Unauthorized)
+
+
+@router.get("/sessions", responses=errors.to_responses(*COMMON))
 async def list_sessions(res: ResourcesDep, user: ActiveUserDep) -> ManySessionsSchema:
-    # sensitive information, extra against for stale access tokens
+    # sensitive information, check again for stale access tokens
     if not await res.sessions.is_valid(user.user_id, user.session_id):
         raise errors.InvalidSession()
     return ManySessionsSchema(sessions=await res.sessions.list_user_session(user.user_id))
 
 
-@router.delete("/sessions")
+@router.delete("/sessions", responses=errors.to_responses(*COMMON))
 async def terminate_all_sessions(res: ResourcesDep, user: ActiveUserDep):
     await res.sessions.terminate_all_for_user(user.user_id)
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/sessions/{session_id}", responses=errors.to_responses(*COMMON, errors.NotFound))
 async def terminate_session(res: ResourcesDep, session_id: UUID4, user: ActiveUserDep):
     if not await res.sessions.terminate_for_user(user.user_id, session_id):
         raise errors.NotFound()
