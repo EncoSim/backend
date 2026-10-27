@@ -5,7 +5,7 @@ from encosim_server.depends import ActiveUserDep, ResourcesDep
 from encosim_server.users.schemas import UserProfile
 
 router = APIRouter(
-    prefix="user",
+    prefix="/user",
     tags=["user"],
     responses=errors.to_responses(errors.Unauthorized, errors.InvalidSession),
 )
