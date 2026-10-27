@@ -60,7 +60,7 @@ class CharacterService:
             async with await session.start_transaction():
                 n = await self.chars.count_documents({"owner_id": owner_id}, session=session)
                 if n >= max_number:
-                    raise errors.TooManyCharacters()
+                    raise errors.TooManyCharacters(errors.AllowedNumberDetail(allowed=max_number))
                 await self.chars.insert_one(char.model_dump(by_alias=True), session=session)
         return char
 

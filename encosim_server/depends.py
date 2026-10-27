@@ -25,18 +25,25 @@ class ActiveUser:
     user_id: UUID
     session_id: UUID
 
-
-async def get_active_user(
+async def get_optional_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     res: ResourcesDep,
-) -> ActiveUser:
+):
     if creds is None:
-        raise errors.Unauthorized()
+        return
     try:
         claims = decode_access_token(res.settings, creds.credentials)
     except jwt.PyJWTError:
-        raise errors.Unauthorized() from None
+        return
     return ActiveUser(user_id=claims.sub, session_id=claims.sid)
+
+OptionalUserDep = Annotated[ActiveUser | None, Depends(get_optional_user)]
+
+
+async def get_active_user(maybe_user: OptionalUserDep) -> ActiveUser:
+    if maybe_user is None:
+        raise errors.Unauthorized()
+    return maybe_user
 
 
 ActiveUserDep = Annotated[ActiveUser, Depends(get_active_user)]

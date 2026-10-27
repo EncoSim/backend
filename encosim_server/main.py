@@ -17,6 +17,7 @@ from encosim_server.core import errors
 from encosim_server.core.settings import Settings, warn_on_insecure_settings
 from encosim_server.database import connect_mongo, health_check_mongo
 from encosim_server.resources import Resources, build_resources
+from encosim_server.simulation.router import router as simu_router
 from encosim_server.users.router import router as user_router
 
 # setup logger
@@ -55,7 +56,7 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
         warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
         app = FastAPI(lifespan=lifespan, debug=True, root_path="/api")
     app.add_exception_handler(errors.ApiError, errors.handle_api_error)
-    for router in (auth_router, char_router, user_router):
+    for router in (auth_router, char_router, user_router, simu_router):
         app.include_router(router)
     return app
 

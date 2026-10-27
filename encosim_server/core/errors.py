@@ -184,8 +184,25 @@ class CharacterOutdated(ApiError):
     detail_model = CharDownload
     detail_description = "Current version of character"
 
+class AllowedNumberDetail(BaseModel):
+    allowed: int
 
 class TooManyCharacters(ApiError):
     status_code = 403
     code = "too_many_characters"
     default_message = "User already has maximum number of characters"
+    detail_model = AllowedNumberDetail
+
+
+class TooManyParticipants(ApiError):
+    status_code = 403
+    code = "too_many_participants"
+    default_message = "Exceeded total number of allowed simulation participants"
+    detail_model = AllowedNumberDetail
+
+
+class TooManyRepetitions(ApiError):
+    status_code = 403
+    code = "too_many_repetitions"
+    default_message = "Exceeded total number of allowed simulation repetitions"
+    detail_model = AllowedNumberDetail
