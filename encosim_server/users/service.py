@@ -2,13 +2,12 @@ import hashlib
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi_typed_errors import Raises
 from pydantic import ValidationError
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.sessions import SessionService
-from encosim_server.core import exceptions
+from encosim_server.core import errors
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS, TOMBSTONES, USERS
@@ -47,7 +46,7 @@ class UserService:
 
     async def upsert_login(
         self, login_id: str, profile: UserProfile
-    ) -> Annotated[tuple[UserInDB, bool], Raises[exceptions.Banned]]:
+    ) -> Annotated[tuple[UserInDB, bool], errors.Raises[errors.Banned]]:
         """Find or create the user for a verified identity.
         Return (user in db, True on first login)
 
@@ -55,7 +54,7 @@ class UserService:
         """
         res = await self.tombstones.find_one({"_id": login_id})
         if res:
-            raise exceptions.Banned()
+            raise errors.Banned()
 
         is_admin = (
             profile.email_verified
@@ -85,7 +84,7 @@ class UserService:
         )
         user = UserInDB.model_validate(raw)
         if user.ban_status.banned:
-            raise exceptions.Banned()
+            raise errors.Banned()
         is_new = user.user_id == new_id
         return user, is_new
 

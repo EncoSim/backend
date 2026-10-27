@@ -6,7 +6,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.schema import SessionSchema
 from encosim_server.auth.sessions import SessionService, get_session_info
-from encosim_server.core import exceptions
+from encosim_server.core import errors
 from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
@@ -39,7 +39,7 @@ def test_session_info_is_a_readable_label_not_an_object_repr():
 async def test_create_returns_token_and_id_and_stores_only_a_hash(
     users: UserService, sessions: SessionService, db
 ):
-    user = await login(users)
+    user, _ = await login(users)
     token, session_id = await sessions.create(user, CHROME_WIN)
 
     assert isinstance(session_id, UUID)
@@ -52,7 +52,7 @@ async def test_create_returns_token_and_id_and_stores_only_a_hash(
 
 
 async def test_new_session_is_listed_immediately(users: UserService, sessions: SessionService):
-    user = await login(users)
+    user, _ = await login(users)
     _, session_id = await sessions.create(user, CHROME_WIN)
 
     listed = await sessions.list_user_session(user.user_id)
@@ -71,7 +71,7 @@ async def test_new_session_is_listed_immediately(users: UserService, sessions: S
 async def test_session_limit_evicts_the_least_recently_used(
     users: UserService, sessions: SessionService, clock
 ):
-    user = await login(users)
+    user, _ = await login(users)
     ids = []
     # limit is 3 (from pinned settings)
     for _ in range(3):
@@ -89,8 +89,8 @@ async def test_session_limit_evicts_the_least_recently_used(
 
 
 async def test_session_limit_is_per_user(users: UserService, sessions: SessionService, clock):
-    alice = await login(users, "google:alice")
-    bob = await login(users, "google:bob", email="bob@example.com")
+    alice, _ = await login(users, "google:alice")
+    bob, _ = await login(users, "google:bob", email="bob@example.com")
     for _ in range(3):
         await sessions.create(alice, CHROME_WIN)
         clock.tick(seconds=1)
@@ -114,7 +114,7 @@ async def test_token_parsing():
 async def test_rotate_issues_a_new_token_and_extends_ttl(
     users: UserService, sessions: SessionService, db, clock, settings: Settings
 ):
-    user = await login(users)
+    user, _ = await login(users)
     token, sid = await sessions.create(user, CHROME_WIN)
     clock.tick(days=1)
     print(settings.session_ttl)
@@ -128,7 +128,7 @@ async def test_rotate_issues_a_new_token_and_extends_ttl(
 
 
 async def test_rotated_token_can_be_rotated_again(users: UserService, sessions: SessionService):
-    user = await login(users)
+    user, _ = await login(users)
     token, _ = await sessions.create(user, CHROME_WIN)
     second, _, _ = await sessions.rotate(token)
     third, _, _ = await sessions.rotate(second)
@@ -138,16 +138,16 @@ async def test_rotated_token_can_be_rotated_again(users: UserService, sessions: 
 async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
     users: UserService, sessions: SessionService
 ):
-    user = await login(users)
+    user, _ = await login(users)
     old, sid = await sessions.create(user, CHROME_WIN)
     new, _, _ = await sessions.rotate(old)
 
-    with pytest.raises(exceptions.InvalidSession) as exc:
+    with pytest.raises(errors.InvalidSession) as exc:
         await sessions.rotate(old)  # replay of the previous token
     assert_invalid(exc)
 
     assert await sessions.list_user_session(user.user_id) == []
-    with pytest.raises(exceptions.InvalidSession) as exc:
+    with pytest.raises(errors.InvalidSession) as exc:
         await sessions.rotate(new)  # the legitimate holder is logged out too
     assert_invalid(exc)
 
@@ -155,10 +155,10 @@ async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
 async def test_wrong_secret_is_rejected_and_kills_the_session(
     users: UserService, sessions: SessionService
 ):
-    user = await login(users)
+    user, _ = await login(users)
     token, _ = await sessions.create(user, CHROME_WIN)
 
-    with pytest.raises(exceptions.InvalidSession):
+    with pytest.raises(errors.InvalidSession):
         await sessions.rotate(tamper_refresh_token(token))
 
     assert await sessions.list_user_session(user.user_id) == []
@@ -166,13 +166,13 @@ async def test_wrong_secret_is_rejected_and_kills_the_session(
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "no-dot-here", "....", "not-a-uuid.secret"])
 async def test_malformed_token_is_rejected(sessions: SessionService, garbage):
-    with pytest.raises(exceptions.InvalidSession):
+    with pytest.raises(errors.InvalidSession):
         await sessions.rotate(garbage)
 
 
 async def test_token_for_unknown_session_is_rejected(sessions: SessionService):
     token, _ = new_refresh_token(uuid4())
-    with pytest.raises(exceptions.InvalidSession):
+    with pytest.raises(errors.InvalidSession):
         await sessions.rotate(token)
 
 
@@ -184,12 +184,12 @@ async def test_expired_session_cannot_be_rotated(
     Drop the TTL index here so the document stays around deterministically
     (mongomock would otherwise purge it immediately, a real server only after a while).
     """
-    user = await login(users)
+    user, _ = await login(users)
     token, sid = await sessions.create(user, CHROME_WIN)
     expired = clock() - timedelta(minutes=1)
     await db[SESSIONS].update_one({"_id": sid}, {"$set": {"expires_at": expired}})
 
-    with pytest.raises(exceptions.InvalidSession):
+    with pytest.raises(errors.InvalidSession):
         await sessions.rotate(token)
 
     doc = await db[SESSIONS].find_one({"_id": sid})
@@ -201,7 +201,7 @@ async def test_expired_session_cannot_be_rotated(
 
 
 async def test_terminate_removes_only_that_session(users: UserService, sessions: SessionService):
-    user = await login(users)
+    user, _ = await login(users)
     _, a = await sessions.create(user, CHROME_WIN)
     _, b = await sessions.create(user, FIREFOX_LINUX)
 
@@ -217,7 +217,7 @@ async def test_terminate_unknown_session_is_a_noop(users: UserService, sessions:
 async def test_terminate_by_token_requires_the_current_token(
     users: UserService, sessions: SessionService
 ):
-    user = await login(users)
+    user, _ = await login(users)
     old, sid = await sessions.create(user, CHROME_WIN)
     current, _, _ = await sessions.rotate(old)
 
@@ -240,8 +240,8 @@ async def test_terminate_by_token_is_silent_for_garbage(
 
 async def test_terminate_for_user_checks_ownership(users: UserService, sessions: SessionService):
     sessions = sessions
-    alice = await login(users, "google:alice")
-    bob = await login(users, "google:bob", email="bob@example.com")
+    alice, _ = await login(users, "google:alice")
+    bob, _ = await login(users, "google:bob", email="bob@example.com")
     _, alice_session = await sessions.create(alice, CHROME_WIN)
 
     assert await sessions.terminate_for_user(bob.user_id, alice_session) is False
@@ -256,8 +256,8 @@ async def test_terminate_all_for_user_leaves_other_users_alone(
 ):
     users = users
     sessions = sessions
-    alice = await login(users, "google:alice")
-    bob = await login(users, "google:bob", email="bob@example.com")
+    alice, _ = await login(users, "google:alice")
+    bob, _ = await login(users, "google:bob", email="bob@example.com")
     await sessions.create(alice, CHROME_WIN)
     await sessions.create(alice, FIREFOX_LINUX)
     _, bobs = await sessions.create(bob, CHROME_WIN)
@@ -277,7 +277,7 @@ async def test_list_is_sorted_by_last_use_and_skips_expired(
     users = users
     sessions = sessions
 
-    user = await login(users)
+    user, _ = await login(users)
     t_a, a = await sessions.create(user, CHROME_WIN)
     clock.tick(seconds=1)
     _, b = await sessions.create(user, FIREFOX_LINUX)
@@ -298,5 +298,5 @@ async def test_list_is_sorted_by_last_use_and_skips_expired(
 async def test_list_for_user_without_sessions_is_empty(
     users: UserService, sessions: SessionService
 ):
-    user = await login(users)
+    user, _ = await login(users)
     assert await sessions.list_user_session(user.user_id) == []

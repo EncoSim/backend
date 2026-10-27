@@ -2,11 +2,9 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
-from fastapi_typed_errors import Raises
-
 from encosim_server.auth.google import GoogleVerifier
 from encosim_server.auth.sessions import SessionService
-from encosim_server.core import exceptions
+from encosim_server.core import errors
 from encosim_server.core.security import create_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.users.models import UserInDB
@@ -39,7 +37,7 @@ class AuthService:
 
     async def login_google(
         self, id_token: str, user_agent: str | None
-    ) -> Annotated[LoginResult, Raises[exceptions.InvalidGoogleToken, exceptions.Banned]]:
+    ) -> Annotated[LoginResult, errors.Raises[errors.InvalidGoogleToken, errors.Banned]]:
         id, profile = await self.google.verify(id_token)
         user, is_new = await self.users.upsert_login(id, profile)
         refresh, sid = await self.sessions.create(user, user_agent)
@@ -47,13 +45,13 @@ class AuthService:
 
     async def refresh(
         self, refresh_token: str
-    ) -> Annotated[LoginResult, Raises[exceptions.InvalidSession]]:
+    ) -> Annotated[LoginResult, errors.Raises[errors.InvalidSession]]:
         """refresh the login session"""
         new_refresh, session_id, user_id = await self.sessions.rotate(refresh_token)
         user = await self.users.get(user_id)
         if not user or user.ban_status.banned:
             await self.sessions.terminate_all_for_user(user_id)
-            raise exceptions.InvalidSession()
+            raise errors.InvalidSession()
         return LoginResult(False, user, self._new_access(user, session_id), new_refresh)
 
     async def logout(self, refresh_token: str | None) -> None:

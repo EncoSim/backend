@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import jwt
+from fastapi import Request, Response
 from pydantic import AwareDatetime, BaseModel, BeforeValidator, ValidationError
 
 from encosim_server.core.settings import Settings
@@ -93,3 +94,30 @@ def split_refresh_token(token: str) -> tuple[UUID, str] | None:
 
 def constant_time_equal(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
+
+
+# --- refresh cookie --------------------------------------------------------
+
+
+def refresh_cookie_path(request: Request, settings: Settings) -> str:
+    """The path the BROWSER sees. Behind `root_path="/api"` that is /api/auth, not /auth: with the
+    wrong path the browser never sends the cookie back and every refresh fails."""
+    return request.scope.get("root_path", "") + settings.cookie_path
+
+
+def set_refresh_cookie(
+    request: Request, response: Response, settings: Settings, token: str
+) -> None:
+    response.set_cookie(
+        settings.cookie_name,
+        token,
+        max_age=int(settings.session_ttl.total_seconds()),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        path=refresh_cookie_path(request, settings),
+    )
+
+
+def clear_refresh_cookie(request: Request, response: Response, settings: Settings) -> None:
+    response.delete_cookie(settings.cookie_name, path=refresh_cookie_path(request, settings))

@@ -419,7 +419,6 @@ dependencies = [
     { name = "encosim" },
     { name = "fastapi" },
     { name = "fastapi-docs-exception" },
-    { name = "fastapi-typed-errors" },
     { name = "google-auth", extra = ["requests"] },
     { name = "pydantic", extra = ["email", "timezone"] },
     { name = "pydantic-settings" },
@@ -443,7 +442,6 @@ requires-dist = [
     { name = "encosim", directory = "../simulator" },
     { name = "fastapi", specifier = ">=0.152.0" },
     { name = "fastapi-docs-exception", specifier = ">=0.4.3" },
-    { name = "fastapi-typed-errors", specifier = ">=1.0.1" },
     { name = "google-auth", extras = ["requests"], specifier = ">=2.62.0" },
     { name = "pydantic", extras = ["email", "timezone"], specifier = ">=2.14.1" },
     { name = "pydantic-settings", specifier = ">=2.16.1" },
@@ -486,19 +484,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6b/48/1c5567cc509b56aa2ec6f80e5a1b626e8e06b730f9e94d2bb1f0ed922bdd/fastapi_docs_exception-0.4.3.tar.gz", hash = "sha256:e8b7cfed79b244a63e5a50a255dd98601dece89983e87e0cd6309f47a4a92e56", size = 186398, upload-time = "2025-07-24T21:56:58.751Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8d/1c/9bd97abc7325585c23d759bb626f85a18a5829c6a9d6e8df7095d5baad9f/fastapi_docs_exception-0.4.3-py3-none-any.whl", hash = "sha256:c7897236d132a5e25a1e0486a1ed271dd84732724e207bfd072f96d90ad870d8", size = 6991, upload-time = "2025-07-24T21:56:57.485Z" },
-]
-
-[[package]]
-name = "fastapi-typed-errors"
-version = "1.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/7c/c705bcef7cd6dd7d6ee7e6d6b3006adb4e4777317400b2b47ab30d130622/fastapi_typed_errors-1.0.1.tar.gz", hash = "sha256:4f7e5a51f42f4daaa45893cdd1ae4004c348ffeb8f9bb60e56e8329dc4f3f356", size = 21097, upload-time = "2026-07-24T21:58:03.969Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/ef/30bd569c3980d21970dc98033df13d3ea8cf8fa564d022483ed04b85d4a2/fastapi_typed_errors-1.0.1-py3-none-any.whl", hash = "sha256:5fd6112421a99e6738357ac9aeb573954154ffe2479e0f42062606734c8df9e8", size = 27015, upload-time = "2026-07-24T21:58:02.892Z" },
 ]
 
 [[package]]

@@ -1,17 +1,14 @@
 import logging
-from typing import Annotated, TypeVar
+from typing import Annotated
 from uuid import UUID, uuid4
 
-from encosim.components.shape_changing_component import BaseModel
-from fastapi_typed_errors import Raises
 from pydantic import ValidationError
 from pymongo import ReturnDocument
-from pymongo.asynchronous.cursor import AsyncCursor
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.characters.models import CharInDB
 from encosim_server.characters.schema import CharDownload, CharUpload
-from encosim_server.core import exceptions
+from encosim_server.core import errors
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS
@@ -25,10 +22,10 @@ class CharacterService:
 
     async def get(
         self, char_id: UUID, owner_id: UUID
-    ) -> Annotated[CharInDB, Raises[exceptions.NotFound]]:
+    ) -> Annotated[CharInDB, errors.Raises[errors.NotFound]]:
         doc = await self.chars.find_one({"_id": char_id, "owner_id": owner_id})
         if doc is None:
-            raise exceptions.NotFound()
+            raise errors.NotFound()
         return CharInDB.model_validate(doc)
 
     # TODO: step-wise queries
@@ -39,7 +36,7 @@ class CharacterService:
                 try:
                     found.append(CharInDB.model_validate(doc))
                 except ValidationError as e:
-                    logger.error("Corrupted character", exc_info=e)
+                    logger.error(f"Corrupted character {doc['_id']}", exc_info=e)
         return found
 
     def count_owned(self, owner_id: UUID):
@@ -47,7 +44,7 @@ class CharacterService:
 
     async def create(
         self, owner_id: UUID, payload: CharUpload, max_number: int | None = None
-    ) -> CharInDB:
+    ) -> Annotated[CharInDB, errors.Raises[errors.TooManyCharacters]]:
         now = utcnow()
         char = CharInDB(
             char_id=uuid4(),
@@ -63,13 +60,13 @@ class CharacterService:
             async with await session.start_transaction():
                 n = await self.chars.count_documents({"owner_id": owner_id}, session=session)
                 if n >= max_number:
-                    raise exceptions.TooManyCharacters()
+                    raise errors.TooManyCharacters()
                 await self.chars.insert_one(char.model_dump(by_alias=True), session=session)
         return char
 
     async def update(
         self, char_id: UUID, owner_id: UUID, payload: CharUpload
-    ) -> Annotated[CharInDB, Raises[exceptions.NotFound, exceptions.CharacterOutdated]]:
+    ) -> Annotated[CharInDB, errors.Raises[errors.NotFound, errors.CharacterOutdated]]:
         doc = await self.chars.find_one_and_update(
             {"_id": char_id, "owner_id": owner_id, "version": payload.version},
             {
@@ -88,11 +85,12 @@ class CharacterService:
         real = await self.get(char_id, owner_id)
         # TODO: how to document errors cleanly?
         payload = CharDownload.model_validate(real, from_attributes=True)
-        raise exceptions.CharacterOutdated(payload)
+        raise errors.CharacterOutdated(detail=payload)
 
     async def delete(
         self, char_id: UUID, owner_id: UUID
-    ) -> Annotated[None, Raises[exceptions.NotFound]]:
-        res = await self.chars.delete_one({"_id": char_id, "owner_id": owner_id})
-        if res.deleted_count == 0:
-            raise exceptions.NotFound()
+    ) -> Annotated[CharInDB, errors.Raises[errors.NotFound]]:
+        doc = await self.chars.find_one_and_delete({"_id": char_id, "owner_id": owner_id})
+        if doc is None:
+            raise errors.NotFound()
+        return CharInDB.model_validate(doc)
