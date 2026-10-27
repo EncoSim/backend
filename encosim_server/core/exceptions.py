@@ -10,7 +10,6 @@ class InvalidGoogleToken(BaseError[Literal["invalid_google_token"]]):
     http_status = HTTPStatus.UNAUTHORIZED
     description = "Invalid google id token"
 
-
 class InvalidSession(BaseError[Literal["invalid_session"]]):
     http_status = HTTPStatus.UNAUTHORIZED
     description = "Invalid login session. Please log in again."
@@ -61,3 +60,8 @@ class CharacterOutdated(BaseError[Literal["character_outdated"]]):
             detail=str(self.detail),
             correct_version=self.attachment,
         )
+
+
+class TooManyCharacters(BaseError[Literal["too_many_characters"]]):
+    http_status = HTTPStatus.FORBIDDEN
+    description = "User already has maximum number of characters"

@@ -19,3 +19,7 @@ class CharDownload(CharUpload):
     created_at: AwareDatetime
     modified_at: AwareDatetime
     data: EntityConfig
+
+
+class ManyCharDownload(BaseModel):
+    characters: list[CharDownload]

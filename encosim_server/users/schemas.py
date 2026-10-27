@@ -1,6 +1,14 @@
 from typing import Annotated
 
-from pydantic import AfterValidator, AnyUrl, AwareDatetime, BaseModel, ConfigDict, NonNegativeInt
+from pydantic import (
+    AnyUrl,
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    NonNegativeInt,
+)
 
 
 class BanStatus(BaseModel):
@@ -20,6 +28,6 @@ class UserProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str | None
-    email: Annotated[str, AfterValidator(str.lower)] | None
+    email: Annotated[EmailStr, BeforeValidator(str.lower)] | None
     email_verified: bool = False
     picture: AnyUrl | None

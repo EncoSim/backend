@@ -32,26 +32,22 @@ class CharacterService:
         return CharInDB.model_validate(doc)
 
     # TODO: step-wise queries
-    async def list(self, owner_id: UUID):
+    async def list(self, owner_id: UUID) -> list[CharInDB]:
+        found = []
         async with self.chars.find({"owner_id": owner_id}) as cursor:
-            return [x async for x in self._iterate_valid(cursor)]
-
-    T = TypeVar("T", bound=BaseModel)
-
-    async def _iterate_valid(self, cursor: AsyncCursor, validator: type[T] = CharInDB):
-        async for doc in cursor:
-            try:
-                char = validator.model_validate(doc)
-            except ValidationError as e:
-                logger.debug("Parsing character {%s} failed: %s", doc.get("_id"), e)
-                continue
-            yield char
+            async for doc in cursor:
+                try:
+                    found.append(CharInDB.model_validate(doc))
+                except ValidationError as e:
+                    logger.error("Corrupted character", exc_info=e)
+        return found
 
     def count_owned(self, owner_id: UUID):
         return self.chars.count_documents({"owner_id": owner_id})
 
-    async def create(self, owner_id: UUID, payload: CharUpload):
-        """does NOT perform count check, because that depends on user priviledges"""
+    async def create(
+        self, owner_id: UUID, payload: CharUpload, max_number: int | None = None
+    ) -> CharInDB:
         now = utcnow()
         char = CharInDB(
             char_id=uuid4(),
@@ -61,7 +57,14 @@ class CharacterService:
             version=0,
             data=payload.data,
         )
-        await self.chars.insert_one(char.model_dump(by_alias=True))
+        if max_number is None:
+            max_number = self.settings.max_characters
+        async with self.chars.database.client.start_session() as session:
+            async with await session.start_transaction():
+                n = await self.chars.count_documents({"owner_id": owner_id}, session=session)
+                if n >= max_number:
+                    raise exceptions.TooManyCharacters()
+                await self.chars.insert_one(char.model_dump(by_alias=True), session=session)
         return char
 
     async def update(

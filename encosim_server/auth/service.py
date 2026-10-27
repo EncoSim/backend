@@ -15,6 +15,7 @@ from encosim_server.users.service import UserService
 
 @dataclass
 class LoginResult:
+    is_new: bool
     user: UserInDB
     access_token: str
     refresh_token: str
@@ -40,9 +41,9 @@ class AuthService:
         self, id_token: str, user_agent: str | None
     ) -> Annotated[LoginResult, Raises[exceptions.InvalidGoogleToken, exceptions.Banned]]:
         id, profile = await self.google.verify(id_token)
-        user = await self.users.upsert_login(id, profile)
+        user, is_new = await self.users.upsert_login(id, profile)
         refresh, sid = await self.sessions.create(user, user_agent)
-        return LoginResult(user, self._new_access(user, sid), refresh)
+        return LoginResult(is_new, user, self._new_access(user, sid), refresh)
 
     async def refresh(
         self, refresh_token: str
@@ -53,7 +54,7 @@ class AuthService:
         if not user or user.ban_status.banned:
             await self.sessions.terminate_all_for_user(user_id)
             raise exceptions.InvalidSession()
-        return LoginResult(user, self._new_access(user, session_id), new_refresh)
+        return LoginResult(False, user, self._new_access(user, session_id), new_refresh)
 
     async def logout(self, refresh_token: str | None) -> None:
         """Silent on failure. Uses the refresh cookie so it works with an expired access token."""

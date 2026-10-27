@@ -3,6 +3,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi_typed_errors import Raises
+from pydantic import ValidationError
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
@@ -33,10 +34,22 @@ class UserService:
         if raw:
             return UserInDB.model_validate(raw)
 
+    async def list(self) -> tuple[list[UserInDB], list[UUID]]:
+        out = []
+        corrupt = []
+        async with self.users.find({}) as cursor:
+            async for doc in cursor:
+                try:
+                    out.append(UserInDB.model_validate(doc))
+                except ValidationError:
+                    corrupt.append(UUID(hex=doc["_id"]))
+        return out, corrupt
+
     async def upsert_login(
         self, login_id: str, profile: UserProfile
-    ) -> Annotated[UserInDB, Raises[exceptions.Banned]]:
-        """Find or create the user for a verified identity
+    ) -> Annotated[tuple[UserInDB, bool], Raises[exceptions.Banned]]:
+        """Find or create the user for a verified identity.
+        Return (user in db, True on first login)
 
         Assumes `login_id` belongs to an authorized party!
         """
@@ -51,6 +64,7 @@ class UserService:
         )
 
         now = utcnow()
+        new_id = uuid4()
         raw = await self.users.find_one_and_update(
             {"login_id": login_id},
             {
@@ -60,7 +74,7 @@ class UserService:
                 },
                 "$setOnInsert": {
                     "login_id": login_id,
-                    "_id": uuid4(),
+                    "_id": new_id,
                     "admin": is_admin,
                     "created_at": now,
                     "ban_status": {"banned": False, "number": 0},
@@ -72,7 +86,8 @@ class UserService:
         user = UserInDB.model_validate(raw)
         if user.ban_status.banned:
             raise exceptions.Banned()
-        return user
+        is_new = user.user_id == new_id
+        return user, is_new
 
     async def ban(self, user_id: UUID, reason: str) -> bool:
         res = await self.users.update_one(

@@ -70,7 +70,7 @@ async def test_auto_promotion_on_first_login(users: UserService, email, verified
 
 
 async def test_login_without_email_is_a_plain_user(users: UserService):
-    user = await users.upsert_login(
+    user, _ = await users.upsert_login(
         "google:anon",
         UserProfile(
             name="Anon",

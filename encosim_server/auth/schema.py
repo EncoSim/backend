@@ -6,7 +6,11 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from encosim_server.users.schemas import UserProfile
 
 
-class LoginSchema(BaseModel):
+class GoogleLoginInSchema(BaseModel):
+    id_token: Annotated[str, Field(description="token from Google Identity Services")]
+
+
+class LoginOutSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: UUID
@@ -20,3 +24,7 @@ class SessionSchema(BaseModel):
     info: str
     last_used_at: AwareDatetime
     expires_at: AwareDatetime
+
+
+class ManySessionsSchema(BaseModel):
+    sessions: list[SessionSchema]

@@ -10,7 +10,7 @@ Everything marked ADAPT depends on code I have not seen:
 import pytest
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.auth.service import AuthService
+from encosim_server.auth.service import AuthService, LoginResult
 from encosim_server.auth.sessions import SessionService
 from encosim_server.core import exceptions
 from encosim_server.core.security import decode_access_token
@@ -27,8 +27,9 @@ def fake_token(sub: str = "alice") -> str:
     """google id token for fake verifier"""
     return f"fake:{sub}:{sub}@example.com"
 
-
-async def login(auth: AuthService, sub: str = "alice", user_agent: str | None = CHROME_WIN):
+async def login(
+    auth: AuthService, sub: str = "alice", user_agent: str | None = CHROME_WIN
+) -> LoginResult:
     return await auth.login_google(fake_token(sub), user_agent)
 
 # --- login_google ---------------------------------------------------------------------------------
@@ -77,6 +78,17 @@ async def test_different_google_accounts_are_different_users(auth: AuthService):
     bob = await login(auth, "bob")
 
     assert alice.user.user_id != bob.user.user_id
+
+async def test_only_first_login_creates_user(auth: AuthService, users: UserService):
+    alice = await login(auth, "alice")
+    alice_again = await login(auth, "alice")
+    assert alice.is_new
+    assert not alice_again.is_new
+
+    found, corrupt = await users.list()
+    assert len(found) == 1
+    assert found[0].login_id == "google:alice"
+    assert corrupt == []
 
 
 async def test_invalid_google_token_creates_nothing(auth: AuthService, db: AsyncDatabase):
