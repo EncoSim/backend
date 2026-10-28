@@ -18,6 +18,11 @@ File Structure
      │   ├─ keyfile
      │   ├─ mongodb-<PORT>.sock
      │   └─ mongod.conf
+     ├─ redis
+     │   ├─ production.conf
+     │   ├─ staging.conf
+     │   ├─ local.conf
+     │   └─ test.conf
      ├─ .env.production
      ├─ .env.staging
      ├─ .env.local
@@ -47,6 +52,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from getpass import getpass
+from itertools import chain
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 from urllib.parse import quote_plus
@@ -59,6 +65,7 @@ from pymongo.errors import OperationFailure
 
 from encosim_server.core.settings import Settings
 
+HERE = Path(__file__).parent
 
 def main():
     parser = argparse.ArgumentParser(
@@ -105,7 +112,6 @@ def main():
             cookie_secure=True,
             cookie_samesite="strict",
             auto_promote_to_admin=[],
-            max_sessions_per_user=10,
             mongo_db="encosim-production",
             mongo_user="encosim-production",
         ),
@@ -119,7 +125,6 @@ def main():
             cookie_secure=True,
             cookie_samesite="lax",
             auto_promote_to_admin=[],
-            max_sessions_per_user=10,
             mongo_db="encosim-staging",
             mongo_user="encosim-staging",
         ),
@@ -130,9 +135,8 @@ def main():
             log_level="DEBUG",
             google_client_id="fake-google-client-id",
             cookie_secure=False,
-            cookie_samesite="none",
+            cookie_samesite="lax",
             auto_promote_to_admin=["admin@example.com"],
-            max_sessions_per_user=10,
             mongo_db="encosim-dev",
             mongo_user="encosim-dev",
         ),
@@ -143,9 +147,8 @@ def main():
             log_level="DEBUG",
             google_client_id="fake-google-client-id",
             cookie_secure=False,
-            cookie_samesite="none",
+            cookie_samesite="lax",
             auto_promote_to_admin=["admin@example.com"],
-            max_sessions_per_user=10,
             mongo_db="encosim-test",
             mongo_user="encosim-test",
         ),
@@ -172,9 +175,6 @@ class NonGeneratableSettings(TypedDict):
     # authentication / admins
     # for testing and demos only
     auto_promote_to_admin: list[EmailStr]
-
-    # authentication / session
-    max_sessions_per_user: int
 
     # databases
     # databases / mongodb
@@ -214,6 +214,7 @@ class ConfigWriter:
             mongo_port,
             replica_set,
         )
+        self.redis_writers: list[RedisWriter] = []
         self.setting_writers: list[SettingsWriter] = []
         self.supervisord_writers: list[FileWriter] = []
 
@@ -223,6 +224,7 @@ class ConfigWriter:
         non_generatable_settings: NonGeneratableSettings,
         autorestart: Literal["yes", "no"] = "no",
     ):
+        redis_writer = RedisWriter(self.base_dir / "redis", abbrev)
         setting_writer = SettingsWriter(
             self.base_dir / f".env.{abbrev}",
             Settings(
@@ -236,10 +238,11 @@ class ConfigWriter:
                 cookie_name="Session",
                 cookie_path="/auth/refresh",
                 # database
-                # database / mongo
                 mongo_conn=self.mongo_writer.sock_path,
                 mongo_rs="rs0",
                 mongo_pass=generate_password(),
+                # celery
+                redis_conn=redis_writer.sock,
                 **non_generatable_settings,
             ),
         )
@@ -247,22 +250,31 @@ class ConfigWriter:
             self.base_dir / f"encosim-{abbrev}.ini",
             f"[program:backend-{abbrev}]\n"
             f"user=encosim\n"
-            f"directory={self.base_dir}\n"
-            f"command={sys.executable} -m encosim_server.scripts.{abbrev}\n"
+            f"directory={HERE}\n"
+            f"command=uv run {abbrev}\n"
             f"autostart=no\n"
             f"autorestart={autorestart}\n"
             f"startsecs=10\n"
             f"stdout_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stdout.log\n"
             f"stderr_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stderr.log\n"
             f"\n"
-            f"[program:mongo-{abbrev}]\n"
-            f"command=mongod --config {self.mongo_writer.conf_path}\n"
+            f"[program:redis-{abbrev}]\n"
+            f"command=redis-server {redis_writer.fp}\n"
             f"autostart=no\n"
             f"autorestart={autorestart}\n"
-            f"startsecs=10\n"
+            f"startsecs=5\n"
+            f"stdout_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stdout.log\n"
+            f"stderr_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stderr.log\n"
+            f"\n"
+            f"[program:celery-{abbrev}]\n"
+            f"command=uv run celery-{abbrev}\n"
+            f"autostart=no\n"
+            f"autorestart={autorestart}\n"
+            f"startsecs=5\n"
             f"stdout_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stdout.log\n"
             f"stderr_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stderr.log\n",
         )
+        self.redis_writers.append(redis_writer)
         self.setting_writers.append(setting_writer)
         self.supervisord_writers.append(supervisord_writer)
 
@@ -283,23 +295,51 @@ class ConfigWriter:
         print("--> Done")
         print("--> Writing config files...")
         self.mongo_writer.write()
-        for writer in self.setting_writers:
+        for writer in chain(self.redis_writers, self.setting_writers, self.supervisord_writers):
             writer.write()
-        for writer in self.supervisord_writers:
-            writer.write()
+        self.write_mongo_superd()
         self.write_readme()
         print("--> Done")
+
+    def write_mongo_superd(self):
+        FileWriter(
+            self.base_dir / "encosim-mongo.ini",
+            f"[program:mongo]\n"
+            f"command=mongod --config {self.mongo_writer.conf_path}\n"
+            f"autostart=no\n"
+            f"autorestart=yes\n"
+            f"startsecs=10\n"
+            f"stdout_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stdout.log\n"
+            f"stderr_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stderr.log\n",
+        ).write()
 
     def write_readme(self):
         with (self.base_dir / "README.md").open("w") as f:
             s = f"""\
-            # Database Servers
-            automatically configured
+            # Run a Demo with Automated Configuration
+            The `backend` needs `mongod` and `celery` running. `celery` needs `redis` running.
 
             ## MongoDB
             Start the MongoDB server
             ```sh
             mongod --config {self.mongo_writer.conf_path}
+            ```
+
+            ## Redis
+            Start the Redis server
+            ```sh
+            redis-server {self.redis_writers[0].sock}
+            ```
+
+            ## Celery
+            Start the celery server
+            ```sh
+            uv run celery-dev
+            ```
+
+            ## Start the demo
+            ```sh
+            uv run dev
             ```
             """
             f.write(textwrap.dedent(s))
@@ -465,6 +505,22 @@ class MongoConfigWriter:
             if e.code != 51003:  # user already exists
                 raise
 
+class RedisWriter:
+    def __init__(self, redis_dir: Path, name: str):
+        self.dir = redis_dir
+        self.fp = redis_dir / f"redis-{name}.conf"
+        self.sock = redis_dir / f"redis-{name}.sock"
+
+    def write(self):
+        self.fp.parent.mkdir(exist_ok=True, parents=True)
+        s = f"""\
+        daemonize no
+        port 0
+        unixsocket {self.sock}
+        unixsocketperm 700
+        dir {self.dir}
+        """
+        write_file(self.fp, textwrap.dedent(s))
 
 class SettingsWriter:
     _SAFE = re.compile(r"^[A-Za-z0-9_./:@%+,\-]+$")

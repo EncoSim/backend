@@ -38,14 +38,13 @@ class Settings(BaseSettings):
     auto_promote_to_admin: list[EmailStr]
 
     # authentication / session
-    max_sessions_per_user: int
+    max_sessions_per_user: int = 10
 
     # priviledges
     max_simulation_participants: PositiveInt = 15
     max_simulation_repetitions: PositiveInt = 50
+    max_simulations: PositiveInt = 10
     max_characters: PositiveInt = 30
-    max_simulation_participants_anon: PositiveInt = 10
-    max_simulation_repetitions_anon: PositiveInt = 10
 
     # database
     mongo_conn: Path
@@ -53,6 +52,11 @@ class Settings(BaseSettings):
     mongo_db: str
     mongo_user: str
     mongo_pass: SecretStr
+
+    # celery
+    redis_conn: Path
+    celery_soft_timeout: timedelta = timedelta(minutes=4)
+    celery_hard_timeout: timedelta = timedelta(minutes=5)
 
 
 def warn_on_insecure_settings(settings: Settings):

@@ -2,8 +2,9 @@ import asyncio
 
 import uvicorn
 
+from encosim_server.app import create_app, load_settings_from_env_file, preflight
 from encosim_server.auth.google import FakeGoogleVerifier
-from encosim_server.main import create_app, load_settings_from_env_file, preflight
+from encosim_server.celery import create_celery
 
 ENV_FP = ".env.dev"
 
@@ -15,7 +16,7 @@ def create_dev():
     )
 
 
-def main():
+def backend():
     asyncio.run(preflight(load_settings_from_env_file(ENV_FP)))
     uvicorn.run(
         "encosim_server.scripts.dev:create_dev",
@@ -28,6 +29,9 @@ def main():
         port=8000,
     )
 
-
-if __name__ == "__main__":
-    main()
+def celery():
+    settings = load_settings_from_env_file(ENV_FP)
+    asyncio.run(preflight(settings))
+    app = create_celery(settings)
+    app.worker_main(["worker", "--loglevel=DEBUG"])
+    return app

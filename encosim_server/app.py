@@ -15,7 +15,7 @@ from encosim_server.auth.router import router as auth_router
 from encosim_server.characters.router import router as char_router
 from encosim_server.core import errors
 from encosim_server.core.settings import Settings, warn_on_insecure_settings
-from encosim_server.database import connect_mongo, health_check_mongo
+from encosim_server.database import connect_mongo, health_check_mongo, health_check_redis
 from encosim_server.resources import Resources, build_resources
 from encosim_server.simulation.router import router as simu_router
 from encosim_server.users.router import router as user_router
@@ -55,7 +55,7 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
         app = FastAPI(lifespan=lifespan, debug=True, root_path="/api")
-    app.add_exception_handler(errors.ApiError, errors.handle_api_error)
+    app.add_exception_handler(errors.ApiError, errors.handle_api_error)  # type: ignore
     for router in (auth_router, char_router, user_router, simu_router):
         app.include_router(router)
     return app
@@ -73,18 +73,4 @@ async def preflight(settings: Settings | None = None):
     if settings is None:
         settings = Settings()  # type:ignore
     await health_check_mongo(settings)
-
-
-def main():
-    asyncio.run(preflight())
-    uvicorn.run(
-        "encosim_server.main:create_app",
-        factory=True,
-        host="0.0.0.0",
-        port=8000,
-        workers=4,
-    )
-
-
-if __name__ == "__main__":
-    main()
+    await health_check_redis(settings)

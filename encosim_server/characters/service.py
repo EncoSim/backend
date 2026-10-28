@@ -83,7 +83,6 @@ class CharacterService:
         # either we did the update or send back the most recent version
         # no need for a transaction: we either write or read, never both.
         real = await self.get(char_id, owner_id)
-        # TODO: how to document errors cleanly?
         payload = CharDownload.model_validate(real, from_attributes=True)
         raise errors.CharacterOutdated(detail=payload)
 

@@ -6,6 +6,8 @@ import pymongo
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
+from redis import RedisError
+from redis.asyncio import Redis
 
 from encosim_server.core.settings import Settings
 
@@ -15,6 +17,26 @@ CHARACTERS = "characters"
 USERS = "users"
 SESSIONS = "session"
 TOMBSTONES = "tombstones"
+
+def make_redis_uri(settings: Settings) -> str:
+    # celery needs special format
+    return f"redis+socket://{settings.redis_conn}"
+
+
+async def health_check_redis(settings: Settings, timeout: float = 5):
+    redis = Redis(
+        unix_socket_path=str(settings.redis_conn),
+        socket_connect_timeout=timeout,
+        socket_timeout=timeout,
+        decode_responses=True,
+    )
+    try:
+        if not await redis.ping():
+            raise RuntimeError("Could not connect to Redis")
+    except RedisError as e:
+        raise RuntimeError(f"Could not connect to Redis:\n{e}") from e
+    finally:
+        await redis.aclose()
 
 
 def make_mongo_uri(settings: Settings) -> str:

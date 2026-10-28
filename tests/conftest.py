@@ -26,6 +26,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from encosim_server.app import create_app, preflight
 from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.auth.sessions import SessionService
 from encosim_server.core import security
@@ -37,7 +38,6 @@ from encosim_server.database import (
     USERS,
     connect_mongo,
 )
-from encosim_server.main import preflight
 from encosim_server.resources import Resources, build_resources
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import UserProfile
@@ -185,8 +185,6 @@ def characters(resources: Resources):
 
 @pytest_asyncio.fixture
 async def app(settings, db):
-    from encosim_server.main import create_app
-
     application = create_app(settings, google=FakeGoogleVerifier())
     async with application.router.lifespan_context(application):  # runs startup/shutdown
         yield application
@@ -246,7 +244,7 @@ async def login_as(users: UserService, sessions: SessionService, settings: Setti
         profile = UserProfile(
             name=name, email=f"{name}@example.com", email_verified=True, picture=None
         )
-        user = await users.upsert_login(login_id, profile)
+        user, _ = await users.upsert_login(login_id, profile)
         await users.set_admin(user.user_id, is_admin)
 
         refresh_token, session_id = await sessions.create(user, user_agent)

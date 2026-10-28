@@ -91,6 +91,7 @@ class ApiError(Exception):
 
 
 def handle_api_error(_: Request, exc: ApiError):
+    logger.debug("%s", exc_info=exc)
     if exc.status_code >= 500:
         logger.error("%s: %s", exc.code, exc.message)
     return JSONResponse(exc.body(), status_code=exc.status_code, headers=exc.headers)
@@ -205,4 +206,17 @@ class TooManyRepetitions(ApiError):
     status_code = 403
     code = "too_many_repetitions"
     default_message = "Exceeded total number of allowed simulation repetitions"
+    detail_model = AllowedNumberDetail
+
+
+class SimulationTimeout(ApiError):
+    status_code = 408
+    code = "simulation_timeout"
+    default_message = "Exceeded total simulation time"
+
+
+class TooManySimulations(ApiError):
+    status_code = 429
+    code = "too_many_simulations"
+    default_message = "Exceeded total number of allowed simulations"
     detail_model = AllowedNumberDetail
