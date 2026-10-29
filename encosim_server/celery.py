@@ -3,12 +3,13 @@ from uuid import UUID, uuid4
 
 import redis
 import redis.asyncio as aioredis
-from _pytest.nodes import SEP
 from celery import Celery, Task
 from celery.result import AsyncResult
 
 from encosim_server.core.settings import Settings
 from encosim_server.database import make_redis_uri
+
+# TODO: make task limiter a service and wrap celery with it
 
 
 class PatchedCelery(Celery):
@@ -30,8 +31,8 @@ def create_celery(settings: Settings) -> PatchedCelery:
         worker_prefetch_multiplier=1,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
-        task_soft_time_limit=settings.celery_soft_timeout,
-        task_hard_time_limit=settings.celery_hard_timeout,
+        task_soft_time_limit=int(settings.celery_soft_timeout.total_seconds()),
+        task_hard_time_limit=int(settings.celery_hard_timeout.total_seconds()),
         result_extended=True,
     )
     app.user_limiter = UserTaskLimiter(settings)

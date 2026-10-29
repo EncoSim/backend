@@ -9,9 +9,11 @@ ADAPT: `upload()` builds a CharUpload. I only know that the schema has `data` an
 
 import asyncio
 import logging
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from encosim.core.entity_config import create_default
 from pymongo.asynchronous.database import AsyncDatabase
 
@@ -19,6 +21,7 @@ from encosim_server.characters.schema import CharDownload, CharUpload
 from encosim_server.characters.service import CharacterService
 from encosim_server.core import errors
 from encosim_server.database import CHARACTERS
+from tests.conftest import Clock
 
 
 def create_payload(hp: int = 50, version: int = 0) -> CharUpload:
@@ -37,7 +40,7 @@ def bob():
     return uuid4()
 
 
-async def raw(db: AsyncDatabase, char_id: UUID):
+async def raw(db: AsyncDatabase[Any], char_id: UUID):
     return await db[CHARACTERS].find_one({"_id": char_id})
 
 
@@ -45,7 +48,7 @@ async def raw(db: AsyncDatabase, char_id: UUID):
 
 
 async def test_create_sets_initial_state_and_persists(
-    characters: CharacterService, db: AsyncDatabase, alice, clock
+    characters: CharacterService, db: AsyncDatabase[Any], alice: UUID, clock: Clock
 ):
     char = await characters.create(alice, create_payload())
 
@@ -56,12 +59,12 @@ async def test_create_sets_initial_state_and_persists(
     assert await db[CHARACTERS].count_documents({"_id": char.char_id, "owner_id": alice}) == 1
 
 
-async def test_create_ignores_a_client_supplied_version(characters: CharacterService, alice):
+async def test_create_ignores_a_client_supplied_version(characters: CharacterService, alice: UUID):
     char = await characters.create(alice, create_payload(version=5))
     assert char.version == 0
 
 
-async def test_create_assigns_distinct_ids(characters: CharacterService, alice):
+async def test_create_assigns_distinct_ids(characters: CharacterService, alice: UUID):
     a = await characters.create(alice, create_payload())
     b = await characters.create(alice, create_payload())
     assert a.char_id != b.char_id
@@ -70,7 +73,7 @@ async def test_create_assigns_distinct_ids(characters: CharacterService, alice):
 # --- get -----------------------------------------------------------------------------------
 
 
-async def test_get_returns_the_owners_character(characters: CharacterService, alice):
+async def test_get_returns_the_owners_character(characters: CharacterService, alice: UUID):
     created = await characters.create(alice, create_payload())
 
     fetched = await characters.get(created.char_id, alice)
@@ -81,12 +84,14 @@ async def test_get_returns_the_owners_character(characters: CharacterService, al
     assert fetched.data == created.data
 
 
-async def test_get_unknown_character_is_404(characters: CharacterService, alice):
+async def test_get_unknown_character_is_404(characters: CharacterService, alice: UUID):
     with pytest.raises(errors.NotFound):
         await characters.get(uuid4(), alice)
 
 
-async def test_get_someone_elses_character_is_404(characters: CharacterService, alice, bob):
+async def test_get_someone_elses_character_is_404(
+    characters: CharacterService, alice: UUID, bob: UUID
+):
     char = await characters.create(alice, create_payload())
     with pytest.raises(errors.NotFound):
         await characters.get(char.char_id, bob)
@@ -95,7 +100,9 @@ async def test_get_someone_elses_character_is_404(characters: CharacterService, 
 # --- list / count ------------------------------------------------------------------------------
 
 
-async def test_list_returns_only_the_owners_characters(characters: CharacterService, alice, bob):
+async def test_list_returns_only_the_owners_characters(
+    characters: CharacterService, alice: UUID, bob: UUID
+):
     mine = set()
     for _ in range(2):
         mine.add((await characters.create(alice, create_payload())).char_id)
@@ -106,12 +113,12 @@ async def test_list_returns_only_the_owners_characters(characters: CharacterServ
     assert {c.char_id for c in listed} == mine
 
 
-async def test_list_without_characters_is_empty(characters: CharacterService, alice):
+async def test_list_without_characters_is_empty(characters: CharacterService, alice: UUID):
     assert await characters.list(alice) == []
 
 
 async def test_list_skips_documents_that_fail_validation(
-    characters: CharacterService, db: AsyncDatabase, alice, caplog
+    characters: CharacterService, db: AsyncDatabase[Any], alice: UUID, caplog: LogCaptureFixture
 ):
     caplog.set_level(logging.DEBUG, logger="encosim_server")
     good = await characters.create(alice, create_payload())
@@ -125,7 +132,7 @@ async def test_list_skips_documents_that_fail_validation(
 
 
 async def test_count_owned_counts_only_the_owners_characters(
-    characters: CharacterService, alice, bob
+    characters: CharacterService, alice: UUID, bob: UUID
 ):
     assert await characters.count_owned(alice) == 0
     await characters.create(alice, create_payload())
@@ -139,7 +146,9 @@ async def test_count_owned_counts_only_the_owners_characters(
 # --- update (optimistic concurrency) --------------------------------------------------------------
 
 
-async def test_update_replaces_data_and_returns_the_new_state(characters: CharacterService, alice):
+async def test_update_replaces_data_and_returns_the_new_state(
+    characters: CharacterService, alice: UUID
+):
     char = await characters.create(alice, create_payload(hp=1))
 
     updated = await characters.update(
@@ -151,7 +160,7 @@ async def test_update_replaces_data_and_returns_the_new_state(characters: Charac
 
 
 async def test_update_keeps_immutable_fields_and_bumps_modified_at(
-    characters: CharacterService, alice, clock
+    characters: CharacterService, alice: UUID, clock: Clock
 ):
     char = await characters.create(alice, create_payload(hp=1))
     clock.tick(minutes=5)
@@ -166,7 +175,7 @@ async def test_update_keeps_immutable_fields_and_bumps_modified_at(
 
 
 async def test_consecutive_updates_chain_on_the_returned_version(
-    characters: CharacterService, alice
+    characters: CharacterService, alice: UUID
 ):
     char = await characters.create(alice, create_payload(hp=7))
 
@@ -185,7 +194,7 @@ async def test_consecutive_updates_chain_on_the_returned_version(
 
 
 async def test_update_with_a_stale_version_conflicts_and_changes_nothing(
-    characters: CharacterService, alice
+    characters: CharacterService, alice: UUID
 ):
     char = await characters.create(alice, create_payload(hp=1))
     winner = await characters.update(char.char_id, alice, create_payload(hp=2, version=0))
@@ -198,7 +207,7 @@ async def test_update_with_a_stale_version_conflicts_and_changes_nothing(
     assert current.data == winner.data  # the stale write was dropped
 
 
-async def test_conflict_reports_the_current_server_state(characters: CharacterService, alice):
+async def test_conflict_reports_the_current_server_state(characters: CharacterService, alice: UUID):
     char = await characters.create(alice, create_payload(hp=1))
     await characters.update(char.char_id, alice, create_payload(hp=4242, version=0))
 
@@ -210,7 +219,7 @@ async def test_conflict_reports_the_current_server_state(characters: CharacterSe
 
 
 async def test_concurrent_updates_with_the_same_version_only_one_wins(
-    characters: CharacterService, alice
+    characters: CharacterService, alice: UUID
 ):
     char = await characters.create(alice, create_payload(hp=1))
 
@@ -229,13 +238,15 @@ async def test_concurrent_updates_with_the_same_version_only_one_wins(
     assert final.data == winners[0].data
 
 
-async def test_update_unknown_character_is_404_not_409(characters: CharacterService, alice):
+async def test_update_unknown_character_is_404_not_409(characters: CharacterService, alice: UUID):
     with pytest.raises(errors.NotFound) as exc:
         await characters.update(uuid4(), alice, create_payload())
     assert exc.value.status_code == 404
 
 
-async def test_cannot_update_someone_elses_character(characters: CharacterService, alice, bob):
+async def test_cannot_update_someone_elses_character(
+    characters: CharacterService, alice: UUID, bob: UUID
+):
     char = await characters.create(alice, create_payload(hp=1))
 
     with pytest.raises(errors.NotFound):
@@ -249,7 +260,7 @@ async def test_cannot_update_someone_elses_character(characters: CharacterServic
 # --- delete ---------------------------------------------------------------------------------------
 
 
-async def test_delete_removes_only_that_character(characters: CharacterService, alice):
+async def test_delete_removes_only_that_character(characters: CharacterService, alice: UUID):
     keep = await characters.create(alice, create_payload())
     gone = await characters.create(alice, create_payload())
 
@@ -259,7 +270,7 @@ async def test_delete_removes_only_that_character(characters: CharacterService, 
 
 
 async def test_delete_unknown_or_already_deleted_character_is_404(
-    characters: CharacterService, alice
+    characters: CharacterService, alice: UUID
 ):
     char = await characters.create(alice, create_payload())
     await characters.delete(char.char_id, alice)
@@ -269,7 +280,9 @@ async def test_delete_unknown_or_already_deleted_character_is_404(
             await characters.delete(char_id, alice)
 
 
-async def test_cannot_delete_someone_elses_character(characters: CharacterService, alice, bob):
+async def test_cannot_delete_someone_elses_character(
+    characters: CharacterService, alice: UUID, bob: UUID
+):
     char = await characters.create(alice, create_payload())
 
     with pytest.raises(errors.NotFound):

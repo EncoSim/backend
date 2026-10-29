@@ -96,7 +96,7 @@ class SessionService:
     async def terminate_all_for_user(self, user_id: UUID):
         await self.sessions.delete_many({"user_id": user_id})
 
-    async def list_user_session(self, user_id: UUID) -> list[SessionSchema]:
+    async def list_user_sessions(self, user_id: UUID) -> list[SessionSchema]:
         cursor = self.sessions.find(
             {"user_id": user_id, "expires_at": {"$gt": utcnow()}},
         ).sort("last_used_at", -1)

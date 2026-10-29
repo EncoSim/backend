@@ -55,7 +55,7 @@ async def test_new_session_is_listed_immediately(users: UserService, sessions: S
     user, _ = await login(users)
     _, session_id = await sessions.create(user, CHROME_WIN)
 
-    listed = await sessions.list_user_session(user.user_id)
+    listed = await sessions.list_user_sessions(user.user_id)
     assert len(listed) > 0
 
     found: SessionSchema | None = None
@@ -84,7 +84,7 @@ async def test_session_limit_evicts_the_least_recently_used(
     clock.tick(seconds=1)
     _, newest = await sessions.create(user, FIREFOX_LINUX)
 
-    remaining = {s.session_id for s in await sessions.list_user_session(user.user_id)}
+    remaining = {s.session_id for s in await sessions.list_user_sessions(user.user_id)}
     assert remaining == {ids[0][1], ids[2][1], newest}
 
 
@@ -96,8 +96,8 @@ async def test_session_limit_is_per_user(users: UserService, sessions: SessionSe
         clock.tick(seconds=1)
     await sessions.create(bob, CHROME_WIN)
 
-    assert len(await sessions.list_user_session(alice.user_id)) == 3
-    assert len(await sessions.list_user_session(bob.user_id)) == 1
+    assert len(await sessions.list_user_sessions(alice.user_id)) == 3
+    assert len(await sessions.list_user_sessions(bob.user_id)) == 1
 
 
 # --- rotate ----------------------------------------------------------------------
@@ -146,7 +146,7 @@ async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
         await sessions.rotate(old)  # replay of the previous token
     assert_invalid(exc)
 
-    assert await sessions.list_user_session(user.user_id) == []
+    assert await sessions.list_user_sessions(user.user_id) == []
     with pytest.raises(errors.InvalidSession) as exc:
         await sessions.rotate(new)  # the legitimate holder is logged out too
     assert_invalid(exc)
@@ -161,7 +161,7 @@ async def test_wrong_secret_is_rejected_and_kills_the_session(
     with pytest.raises(errors.InvalidSession):
         await sessions.rotate(tamper_refresh_token(token))
 
-    assert await sessions.list_user_session(user.user_id) == []
+    assert await sessions.list_user_sessions(user.user_id) == []
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "no-dot-here", "....", "not-a-uuid.secret"])
@@ -207,7 +207,7 @@ async def test_terminate_removes_only_that_session(users: UserService, sessions:
 
     await sessions.terminate(a)
 
-    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {b}
+    assert ids_from_sessions(await sessions.list_user_sessions(user.user_id)) == {b}
 
 
 async def test_terminate_unknown_session_is_a_noop(users: UserService, sessions: SessionService):
@@ -222,13 +222,13 @@ async def test_terminate_by_token_requires_the_current_token(
     current, _, _ = await sessions.rotate(old)
 
     await sessions.terminate_by_token(old)  # stale token: ignored
-    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {sid}
+    assert ids_from_sessions(await sessions.list_user_sessions(user.user_id)) == {sid}
 
     await sessions.terminate_by_token(tamper_refresh_token(current))  # wrong secret: ignored
-    assert ids_from_sessions(await sessions.list_user_session(user.user_id)) == {sid}
+    assert ids_from_sessions(await sessions.list_user_sessions(user.user_id)) == {sid}
 
     await sessions.terminate_by_token(current)
-    assert await sessions.list_user_session(user.user_id) == []
+    assert await sessions.list_user_sessions(user.user_id) == []
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "not-a-uuid.secret"])
@@ -245,7 +245,7 @@ async def test_terminate_for_user_checks_ownership(users: UserService, sessions:
     _, alice_session = await sessions.create(alice, CHROME_WIN)
 
     assert await sessions.terminate_for_user(bob.user_id, alice_session) is False
-    assert ids_from_sessions(await sessions.list_user_session(alice.user_id)) == {alice_session}
+    assert ids_from_sessions(await sessions.list_user_sessions(alice.user_id)) == {alice_session}
 
     assert await sessions.terminate_for_user(alice.user_id, alice_session) is True
     assert await sessions.terminate_for_user(alice.user_id, alice_session) is False  # already gone
@@ -264,8 +264,8 @@ async def test_terminate_all_for_user_leaves_other_users_alone(
 
     await sessions.terminate_all_for_user(alice.user_id)
 
-    assert await sessions.list_user_session(alice.user_id) == []
-    assert ids_from_sessions(await sessions.list_user_session(bob.user_id)) == {bobs}
+    assert await sessions.list_user_sessions(alice.user_id) == []
+    assert ids_from_sessions(await sessions.list_user_sessions(bob.user_id)) == {bobs}
 
 
 # --- list_user_session ------------------------------------------------------------------
@@ -289,7 +289,7 @@ async def test_list_is_sorted_by_last_use_and_skips_expired(
         {"_id": b}, {"$set": {"expires_at": clock() - timedelta(seconds=1)}}
     )
 
-    listed = await sessions.list_user_session(user.user_id)
+    listed = await sessions.list_user_sessions(user.user_id)
 
     assert [s.session_id for s in listed] == [a, c]
     assert all(s.expires_at > clock() for s in listed)
@@ -299,4 +299,4 @@ async def test_list_for_user_without_sessions_is_empty(
     users: UserService, sessions: SessionService
 ):
     user, _ = await login(users)
-    assert await sessions.list_user_session(user.user_id) == []
+    assert await sessions.list_user_sessions(user.user_id) == []

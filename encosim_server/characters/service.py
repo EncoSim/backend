@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
@@ -16,7 +16,7 @@ from encosim_server.database import CHARACTERS
 logger = logging.getLogger(__name__)
 
 class CharacterService:
-    def __init__(self, settings: Settings, db: AsyncDatabase) -> None:
+    def __init__(self, settings: Settings, db: AsyncDatabase[Any]) -> None:
         self.settings = settings
         self.chars = db[CHARACTERS]
 
@@ -60,7 +60,9 @@ class CharacterService:
             async with await session.start_transaction():
                 n = await self.chars.count_documents({"owner_id": owner_id}, session=session)
                 if n >= max_number:
-                    raise errors.TooManyCharacters(errors.AllowedNumberDetail(allowed=max_number))
+                    raise errors.TooManyCharacters(
+                        detail=errors.AllowedNumberDetail(allowed=max_number)
+                    )
                 await self.chars.insert_one(char.model_dump(by_alias=True), session=session)
         return char
 

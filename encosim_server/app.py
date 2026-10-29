@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import sys
 import warnings
@@ -6,7 +5,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TypedDict
 
-import uvicorn
 from fastapi import FastAPI
 from uvicorn.logging import DefaultFormatter
 

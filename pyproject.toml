@@ -40,6 +40,12 @@ dev = [
 requires = ["uv_build>=0.13.3,<0.14.0"]
 build-backend = "uv_build"
 
+[tool.pyrefly.errors]
+implicit-any = "warn"
+implicit-any-lambda = "ignore"
+# implicit-any-type-argument = "ignore"
+# implicit-any-parameter = "ignore"
+
 [tool.pytest]
 log_cli = false
 testpaths = ["tests"]

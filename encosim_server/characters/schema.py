@@ -2,11 +2,14 @@ from typing import Annotated
 from uuid import UUID
 
 from encosim import EntityConfig
-from pydantic import AwareDatetime, BaseModel, Field, NonNegativeInt
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, NonNegativeInt
+from pydantic.aliases import AliasChoices
 
 
 class CharUpload(BaseModel):
     """Schema to create/modify a Character"""
+
+    model_config = ConfigDict(extra="forbid")
 
     version: NonNegativeInt
     data: EntityConfig
@@ -15,7 +18,9 @@ class CharUpload(BaseModel):
 class CharDownload(CharUpload):
     """Stored character data"""
 
-    char_id: Annotated[UUID, Field(validation_alias="_id")]
+    model_config = ConfigDict(extra="ignore")
+
+    char_id: Annotated[UUID, Field(validation_alias=AliasChoices("_id", "char_id"))]
     created_at: AwareDatetime
     modified_at: AwareDatetime
     data: EntityConfig

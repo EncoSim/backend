@@ -133,8 +133,8 @@ async def test_ban_marks_user_and_ends_all_their_sessions(
     assert banned.ban_status.banned is True
     assert banned.ban_status.reason == "spam"
     assert banned.ban_status.banned_at == clock()
-    assert await sessions.list_user_session(alice.user_id) == []
-    assert ids_from_sessions(await sessions.list_user_session(bob.user_id)) == {bobs}
+    assert await sessions.list_user_sessions(alice.user_id) == []
+    assert ids_from_sessions(await sessions.list_user_sessions(bob.user_id)) == {bobs}
 
     unbanned = await users.get(bob.user_id)
     assert unbanned is not None
@@ -199,7 +199,7 @@ async def test_delete_removes_user_sessions_and_characters_but_nobody_elses(
     assert await db[SESSIONS].count_documents({"user_id": alice.user_id}) == 0
     assert await db[CHARACTERS].count_documents({"owner_id": alice.user_id}) == 0
     assert await users.get(bob.user_id) is not None
-    assert ids_from_sessions(await sessions.list_user_session(bob.user_id)) == {bobs}
+    assert ids_from_sessions(await sessions.list_user_sessions(bob.user_id)) == {bobs}
     assert await db[CHARACTERS].count_documents({"_id": bobs_character}) == 1
 
 

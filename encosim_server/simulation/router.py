@@ -1,5 +1,4 @@
 import logging
-import traceback
 
 from celery.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from celery.exceptions import TimeoutError as CeleryTimeout
@@ -40,7 +39,7 @@ async def simulate(
         )
     total_members = sum(len(t) for t in config.teams)
     if total_members > res.settings.max_simulation_participants:
-        raise errors.TooManyRepetitions(
+        raise errors.TooManyParticipants(
             detail=errors.AllowedNumberDetail(allowed=res.settings.max_simulation_participants)
         )
 
@@ -63,11 +62,15 @@ async def simulate(
     assert result.id is not None
     return summarize(result, result.id)
 
-@router.get("/jobs")
+
+@router.get("", responses=errors.to_responses(errors.Unauthorized))
 async def job_list(res: ResourcesDep, user: ActiveUserDep) -> SimulationList:
     return SimulationList(ids=list(await res.celery.user_limiter.active(user.user_id)))
 
-@router.get("/jobs/{task_id}")
+COMMON = (errors.Unauthorized, errors.NotFound)
+
+
+@router.get("/{task_id}", responses=errors.to_responses(*COMMON))
 async def job_status(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> SimulationResult:
     if not res.celery.user_limiter.task_belongs_to(task_id, user.user_id):
         raise errors.NotFound()
@@ -80,6 +83,7 @@ async def job_status(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> Si
         res.celery.user_limiter.release_sync(task_id)
     return summary
 
+# TODO: add job aborting
 
 logger = logging.getLogger(__name__)
 

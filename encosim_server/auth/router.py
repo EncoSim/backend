@@ -73,7 +73,7 @@ async def list_sessions(res: ResourcesDep, user: ActiveUserDep) -> ManySessionsS
     # sensitive information, check again for stale access tokens
     if not await res.sessions.is_valid(user.user_id, user.session_id):
         raise errors.InvalidSession()
-    return ManySessionsSchema(sessions=await res.sessions.list_user_session(user.user_id))
+    return ManySessionsSchema(sessions=await res.sessions.list_user_sessions(user.user_id))
 
 
 @router.delete("/sessions", responses=errors.to_responses(*COMMON))

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from pymongo.asynchronous.database import AsyncDatabase
 
@@ -15,7 +16,7 @@ from encosim_server.users.service import UserService
 class Resources:
     settings: Settings
     google: GoogleVerifier
-    db: AsyncDatabase
+    db: AsyncDatabase[Any]
     sessions: SessionService
     users: UserService
     auth: AuthService
@@ -23,7 +24,7 @@ class Resources:
     celery: PatchedCelery
 
 
-def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabase):
+def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabase[Any]):
     sessions = SessionService(settings, db)
     users = UserService(settings, db, sessions)
     auth = AuthService(settings, google, sessions, users)

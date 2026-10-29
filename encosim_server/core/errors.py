@@ -86,7 +86,7 @@ class ApiError(Exception):
     def body(self) -> dict[str, Any]:
         content: dict[str, Any] = {"code": self.code, "message": self.message}
         if self.detail is not None:
-            content["detail"] = jsonable_encoder(self.detail)
+            content["detail"] = self.detail.model_dump(mode="json")
         return content
 
 
