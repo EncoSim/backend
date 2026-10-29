@@ -17,7 +17,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from encosim_server.characters.schema import CharUpload
 from encosim_server.database import CHARACTERS, SESSIONS
 from encosim_server.resources import Resources
-from tests.conftest import LoginAs
+from tests.routers.conftest import LoginAs
 
 PROFILE = "/user/profile"
 

@@ -20,9 +20,9 @@ from httpx import AsyncClient
 
 from encosim_server.core.settings import Settings
 from tests import celery_tasks as tasks
-from tests.conftest import LoggedIn, LoginAs
 from tests.helpers import eventually, simulation_payload
 from tests.infra import gate_key
+from tests.routers.conftest import LoggedIn, LoginAs
 
 
 @pytest.fixture

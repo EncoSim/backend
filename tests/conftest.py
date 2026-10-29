@@ -8,10 +8,9 @@ tests are isolated, may run in parallel and never touch your dev data. The Mongo
 needs the rights to create and drop databases.
 
 Redis is not taken from `.env.test`: the suite starts its own `redis-server` on a private unix
-socket (needs `redis-server` on PATH). Tests that need celery also get a real worker process, see
+socket. Tests that need celery also get a real worker process, see
 `worker`. MongoDB must already be running.
-
-DRAFT: not run yet. Places that depend on code I have not seen are marked `ADAPT`."""
+"""
 
 import asyncio
 import gc
@@ -19,43 +18,62 @@ import logging
 import os
 import sys
 import traceback
-from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, AsyncIterator
-from uuid import UUID
 
-import httpx
 import pytest
 import pytest_asyncio
 import redis
 from _pytest.monkeypatch import MonkeyPatch
-from asgi_lifespan import LifespanManager
-from fastapi.applications import FastAPI
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.app import create_app
 from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.core import security
 from encosim_server.core.settings import Settings
-from encosim_server.database import (
-    SESSIONS,
-    connect_mongo,
-    health_check_mongo,
-)
+from encosim_server.database import SESSIONS, connect_mongo, health_check_mongo
 from encosim_server.resources import Resources, build_resources
-from encosim_server.users.models import UserInDB
-from encosim_server.users.schemas import UserProfile
 from tests import infra
-from tests.helpers import CHROME_WIN
+
+logger = logging.getLogger(__name__)
+
+
+# --- time ---------------------------------------------------------------------
+
+
+class Clock:
+    """Controllable replacement for `utcnow`, so ordering/expiry tests are deterministic."""
+
+    def __init__(self):
+        self.now = (
+            security.utcnow()
+        )  # start at the real time (MongoDB's TTL monitor would purge the past)
+
+    def __call__(self):
+        return self.now
+
+    def tick(self, **kwargs: Any):
+        self.now += timedelta(**kwargs)
+
+
+@pytest.fixture(scope="function")
+def clock(monkeypatch: MonkeyPatch):
+    original = security.utcnow
+    c = Clock()  # Clock.__init__ calls `utcnow`, so create it before patching
+    patched_at_least_one = False
+    for module in list(sys.modules.values()):
+        name = getattr(module, "__name__", "")
+        if name.startswith("encosim_server") and getattr(module, "utcnow", None) is original:
+            monkeypatch.setattr(module, "utcnow", c)
+            patched_at_least_one = True
+    if not patched_at_least_one:
+        logger.warning("No clock patch was applied")
+    return c
+
 
 ENV_FILE = Path(os.environ.get("TEST_ENV_FILE", Path(__file__).resolve().parents[1] / ".env.test"))
-
-# "https" so cookies flagged `Secure` are sent back by httpx
-# the app runs with root_path="/api"
-BASE_URL = "https://localhost/api"
 
 # Values the tests rely on are pinned here, so they do not depend on the contents of .env.test.
 PINNED_SETTINGS = {
@@ -184,159 +202,9 @@ def redis_client(settings: Settings) -> Iterator[redis.Redis]:
     client.close()
 
 
-# --- time -----------------------------------------------------------------------------------------
-
-
-class Clock:
-    """Controllable replacement for `utcnow`, so ordering/expiry tests are deterministic."""
-
-    def __init__(self):
-        self.now = (
-            security.utcnow()
-        )  # start at the real time (MongoDB's TTL monitor would purge the past)
-
-    def __call__(self):
-        return self.now
-
-    def tick(self, **kwargs: Any):
-        self.now += timedelta(**kwargs)
-
-
-logger = logging.getLogger(__name__)
-
-
-@pytest.fixture(scope="function")
-def clock(monkeypatch: MonkeyPatch):
-    original = security.utcnow
-    c = Clock()  # Clock.__init__ calls `utcnow`, so create it before patching
-    patched_at_least_one = False
-    for module in list(sys.modules.values()):
-        name = getattr(module, "__name__", "")
-        if name.startswith("encosim_server") and getattr(module, "utcnow", None) is original:
-            monkeypatch.setattr(module, "utcnow", c)
-            patched_at_least_one = True
-    if not patched_at_least_one:
-        logger.warning("No clock patch was applied")
-    return c
-
-
-# --- services -------------------------------------------------------------------------------------
+# --- resources ------------------------------------------------------------------------------------
 
 
 @pytest.fixture
 def resources(db: AsyncDatabase[Any], settings: Settings) -> Resources:
     return build_resources(settings, FakeGoogleVerifier(), db)
-
-
-@pytest.fixture
-def users(resources: Resources):
-    return resources.users
-
-
-@pytest.fixture
-def sessions(resources: Resources):
-    return resources.sessions
-
-
-@pytest.fixture
-def auth(resources: Resources):
-    return resources.auth
-
-
-@pytest.fixture
-def characters(resources: Resources):
-    return resources.characters
-
-
-# --- endpoints (httpx) ----------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def app(settings: Settings, db: AsyncDatabase[Any]):
-    # fastapi and fixtures connect to same mongod server.
-    # depending on the db fixture here cleans up the database for the next test.
-    # `pytest.mark.usefixtures` is not allowed on fixtures
-    _ = db
-    application = create_app(settings, google=FakeGoogleVerifier())
-    async with LifespanManager(application) as manager:
-        yield manager.app
-
-
-MakeClient = Callable[..., httpx.AsyncClient]
-
-
-@pytest_asyncio.fixture
-async def make_client(app: FastAPI) -> AsyncIterator[MakeClient]:
-    """httpx client factory (so cookies dont spill)"""
-    clients: list[httpx.AsyncClient] = []
-
-    def factory(**kwargs: Any) -> httpx.AsyncClient:
-        client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url=BASE_URL,
-            **kwargs,
-        )
-        clients.append(client)
-        return client
-
-    yield factory
-    for client in clients:
-        await client.aclose()
-
-
-@pytest_asyncio.fixture
-async def client(make_client: Callable[..., httpx.AsyncClient]) -> httpx.AsyncClient:
-    """Anonymous client."""
-    return make_client()
-
-
-@dataclass
-class LoggedIn:
-    client: httpx.AsyncClient  # sends the access token and holds the refresh cookie
-    user: UserInDB
-    session_id: UUID
-    access_token: str
-    refresh_token: str
-
-LoginAs = Callable[..., Awaitable[LoggedIn]]
-
-@pytest_asyncio.fixture
-async def login_as(resources: Resources, make_client: Callable[..., httpx.AsyncClient]) -> LoginAs:
-    """Authenticated clients without going through Google.
-
-    alice = await login_as("google:alice")
-    admin = await login_as("google:root", roles=["user", "admin"])
-    r = await alice.client.get("/me")
-    """
-    from encosim_server.core.security import create_access_token  # ADAPT: name/location
-
-    async def _login(
-        login_id: str = "google:alice",
-        *,
-        is_admin: bool = False,
-        user_agent: str = CHROME_WIN,
-    ) -> LoggedIn:
-        name = login_id.split(":")[-1]
-        profile = UserProfile(
-            name=name, email=f"{name}@example.com", email_verified=True, picture=None
-        )
-        user, _ = await resources.users.upsert_login(login_id, profile)
-        await resources.users.set_admin(user.user_id, is_admin)
-
-        refresh_token, session_id = await resources.sessions.create(user, user_agent)
-        access_token = create_access_token(
-            resources.settings,
-            user_id=user.user_id,
-            session_id=session_id,
-        )
-
-        client = make_client(headers={"Authorization": f"Bearer {access_token}"})
-        client.cookies.set(
-            resources.settings.cookie_name,
-            refresh_token,
-            domain="localhost",
-            path="/api" + resources.settings.cookie_path,
-        )
-        return LoggedIn(client, user, session_id, access_token, refresh_token)
-
-    return _login

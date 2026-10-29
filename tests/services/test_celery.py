@@ -40,8 +40,8 @@ class FakeTask:
 
 
 @pytest.fixture
-def limiter(settings: Settings) -> UserTaskLimiter:
-    return UserTaskLimiter(settings)
+def limiter(resources: Resources) -> UserTaskLimiter:
+    return resources.celery.user_limiter
 
 
 # --- task ids ------------------------------------------------------------------------------------

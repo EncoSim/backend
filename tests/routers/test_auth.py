@@ -16,8 +16,8 @@ from httpx import AsyncClient
 from encosim_server.core.security import decode_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
-from tests.conftest import MakeClient
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token
+from tests.routers.conftest import MakeClient
 
 COOKIE_PATH = "/api/auth"
 

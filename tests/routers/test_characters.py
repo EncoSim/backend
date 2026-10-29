@@ -10,7 +10,7 @@ from httpx import AsyncClient
 from encosim_server.characters.schema import CharDownload, CharUpload
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
-from tests.conftest import LoggedIn, LoginAs
+from tests.routers.conftest import LoggedIn, LoginAs
 
 BASE = "/chars/private"
 
