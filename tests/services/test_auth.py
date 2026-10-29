@@ -20,14 +20,9 @@ from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
 from encosim_server.resources import Resources
 from encosim_server.users.service import UserService
-from tests.helpers import CHROME_WIN, FIREFOX_LINUX, ids_from_sessions
+from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token, ids_from_sessions
 
 # --- helpers -----------------------------------------------------------------------------------
-
-
-def fake_token(sub: str = "alice") -> str:
-    """google id token for fake verifier"""
-    return f"fake:{sub}:{sub}@example.com"
 
 async def login(
     auth: AuthService, sub: str = "alice", user_agent: str | None = CHROME_WIN

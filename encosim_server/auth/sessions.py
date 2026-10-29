@@ -3,21 +3,21 @@ from uuid import UUID, uuid4
 
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
+from typing_extensions import Any
 from ua_parser import parse
 
 from encosim_server.auth.schema import SessionSchema
 from encosim_server.core import errors
 from encosim_server.core.security import new_refresh_token, split_refresh_token, utcnow
 from encosim_server.core.settings import Settings
-from encosim_server.database import SESSIONS, USERS
+from encosim_server.database import SESSIONS
 from encosim_server.users.models import UserInDB
 
 
 class SessionService:
-    def __init__(self, settings: Settings, db: AsyncDatabase):
+    def __init__(self, settings: Settings, db: AsyncDatabase[Any]):
         self.settings = settings
         self.sessions = db[SESSIONS]
-        self.users = db[USERS]
 
     async def create(self, user: UserInDB, user_agent: str | None) -> tuple[str, UUID]:
         """Returns (refresh token, session id)."""

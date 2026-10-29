@@ -2,7 +2,6 @@ import logging
 from typing import Annotated, Any, ClassVar, Literal, Mapping, Self, Union
 
 from fastapi import Request
-from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, create_model
 from starlette.responses import JSONResponse
 

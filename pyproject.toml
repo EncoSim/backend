@@ -34,6 +34,7 @@ dev = [
   "pre-commit>=4.7.0",
   "pytest>=9.1.1",
   "pytest-asyncio>=1.4.0",
+  "ruff>=0.17.3",
 ]
 
 [build-system]
@@ -47,6 +48,7 @@ implicit-any-lambda = "ignore"
 # implicit-any-parameter = "ignore"
 
 [tool.pytest]
+addopts = ["--import-mode=importlib"]
 log_cli = false
 testpaths = ["tests"]
 asyncio_mode = "auto"

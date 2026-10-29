@@ -17,8 +17,7 @@ from encosim_server.core.security import decode_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
 from tests.conftest import MakeClient
-from tests.helpers import CHROME_WIN, FIREFOX_LINUX
-from tests.test_auth import fake_token
+from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token
 
 COOKIE_PATH = "/api/auth"
 

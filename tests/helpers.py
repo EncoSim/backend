@@ -8,8 +8,6 @@ from uuid import UUID
 from encosim.core.entity_config import create_default
 
 from encosim_server.auth.schema import SessionSchema
-from encosim_server.users.schemas import UserProfile
-from encosim_server.users.service import UserService
 
 CHROME_WIN = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -22,18 +20,9 @@ def ids_from_sessions(sessions: list[SessionSchema]) -> set[UUID]:
     return {s.session_id for s in sessions}
 
 
-async def login(
-    users: UserService,
-    login_id: str = "google:alice",
-    *,
-    email: str = "alice@example.com",
-    verified: bool = True,
-    name: str = "Alice",
-):
-    """Upsert a user the way the auth layer would after verifying Google."""
-    return await users.upsert_login(
-        login_id, UserProfile(name=name, email=email, email_verified=verified, picture=None)
-    )
+def fake_token(sub: str = "alice", email: str | None = None, name: str | None = None) -> str:
+    """google id token for fake verifier"""
+    return f"fake:{sub}:{email or f'{sub}@example.com'}:{name or sub}"
 
 
 def tamper_refresh_token(token: str) -> str:
