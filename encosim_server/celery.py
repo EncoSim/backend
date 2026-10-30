@@ -6,7 +6,7 @@ import redis.asyncio as aioredis
 from celery import Celery, Task
 from celery.result import AsyncResult
 
-from encosim_server.core.settings import Settings
+from encosim_server.core.settings import Settings, get_settings
 from encosim_server.database import make_redis_uri
 
 # TODO: make task limiter a service and wrap celery with it
@@ -123,3 +123,14 @@ class LimitedTask(Task):
         if status == "RETRY":  # still occupying its slot
             return
         self.app.user_limiter.release_sync(task_id)
+
+
+def main():
+    settings = get_settings()
+    app = create_celery(settings)
+    app.worker_main(["worker", f"--loglevel={settings.log_level}"])
+    return app
+
+
+if __name__ == "__main__":
+    main()

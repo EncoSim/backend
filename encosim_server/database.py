@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import quote_plus
 
 import pymongo
@@ -45,10 +46,11 @@ def make_mongo_uri(settings: Settings) -> str:
     sock = quote_plus(str(settings.mongo_conn))
     db = settings.mongo_db
     rs = settings.mongo_rs
+    port = 9743
     return f"mongodb://{user}:{pw}@{sock}/{db}?replicaSet={rs}&authSource=admin"
 
 
-async def create_indexes(db: AsyncDatabase) -> None:
+async def create_indexes(db: AsyncDatabase[Any]) -> None:
     # TODO: easier way to keep in sync?
     # should very rarely change outside of early development
     await db[CHARACTERS].create_index("owner_id")

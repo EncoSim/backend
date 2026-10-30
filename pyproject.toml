@@ -18,14 +18,12 @@ dependencies = [
 ]
 
 [project.scripts]
+bootstrap = "encosim_server.scripts.bootstrap:main"
+celery = "encosim_server.celery:main"
 character = "encosim_server.scripts.export:default_character"
-dev = "encosim_server.scripts.dev:backend"
-dev-celery = "encosim_server.scripts.dev:celery"
+dev = "encosim_server.scripts.demo:main"
+main = "encosim_server.app:main"
 openapi = "encosim_server.scripts.export:openapi_json"
-production = "encosim_server.scripts.production:backend"
-production-celery = "encosim_server.scripts.production:celery"
-staging = "encosim_server.scripts.staging:backend"
-staging-celery = "encosim_server.scripts.staging:celery"
 
 [dependency-groups]
 dev = [
