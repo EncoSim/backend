@@ -1,4 +1,5 @@
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 import redis
 
 from encosim_server.core.settings import Settings
+from encosim_server.logs import tagged_print
 
 COLORS = {"main": "31", "redis": "33", "celery": "32", "backend": "36"}
 
@@ -59,12 +61,11 @@ class Service:
         logs_dir: Path | None = None,
     ):
         self.name = name
-        if logs_dir is None:
-            self.log = open(os.devnull, "w")
-        else:
-            logs_dir.mkdir(exist_ok=True, parents=True)
-            self.log = (logs_dir / f"{name}.log").open("w")
-
+        self._log_file = (
+            (logs_dir / f"{name}.log").open("a", encoding="utf-8", buffering=1)
+            if logs_dir
+            else None
+        )
         self.proc = subprocess.Popen(
             cmd,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
@@ -74,17 +75,15 @@ class Service:
             bufsize=1,
             start_new_session=True,  # own process group, so Ctrl+C only hits the supervisor
         )
-        self.pump = threading.Thread(target=self._pump, daemon=True)
-        self.pump.start()
+        self._thread = threading.Thread(target=self._pump, daemon=True)
+        self._thread.start()
 
     def _pump(self) -> None:
-        color = COLORS.get(self.name, "0")
         assert self.proc.stdout
         for line in self.proc.stdout:
-            self.log.write(line)
-            sys.stdout.write(f"\x1b[{color}m{self.name:<8}\x1b[0m | {line}")
-            self.log.flush()
-            sys.stdout.flush()
+            tagged_print(self.name, line)
+            if self._log_file:
+                self._log_file.write(line)
 
     def alive(self) -> bool:
         return self.proc.poll() is None
@@ -103,8 +102,9 @@ class Service:
             pass
         self._signal(signal.SIGKILL)  # also catches stragglers (reloader, pool children)
         self.proc.wait()
-        self.pump.join(timeout=3)
-        self.log.close()
+        self._thread.join(timeout=3)
+        if self._log_file:
+            self._log_file.close()
 
 
 def wait_for_redis(settings: Settings, timeout: float = 10.0) -> None:
@@ -125,6 +125,8 @@ def wait_for_redis(settings: Settings, timeout: float = 10.0) -> None:
 @contextmanager
 def supervisor(settings: Settings) -> Generator[list[Service]]:
     """start redis, celery"""
+    if shutil.which("redis-server") is None:
+        raise FileNotFoundError("Could not find 'redis-server' binary")
     if settings.redis_conn.exists():
         raise FileExistsError(f"Redis server is already running on socket {settings.redis_conn}")
 
@@ -147,13 +149,7 @@ def supervisor(settings: Settings) -> Generator[list[Service]]:
         )
         wait_for_redis(settings)
         # TODO: enable reloading for celery?
-        services.append(
-            Service(
-                "celery",
-                [sys.executable, "-m", "encosim_server.celery"],
-                logs_dir=settings.logs_dir,
-            )
-        )
+        services.append(Service("celery", [sys.executable, "-m", "encosim_server.celery"]))
         yield services
     finally:
         for service in reversed(services):

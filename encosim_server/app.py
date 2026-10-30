@@ -3,7 +3,7 @@ import logging
 import sys
 import warnings
 from contextlib import asynccontextmanager
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import uvicorn
 from fastapi import FastAPI
@@ -15,6 +15,7 @@ from encosim_server.characters.router import router as char_router
 from encosim_server.core import errors
 from encosim_server.core.settings import Settings, get_settings
 from encosim_server.database import connect_mongo, health_check_mongo, health_check_redis
+from encosim_server.logs import build_log_config, configure_logging
 from encosim_server.resources import Resources, build_resources
 from encosim_server.simulation.router import router as simu_router
 from encosim_server.users.router import router as user_router
@@ -37,8 +38,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     settings = settings or get_settings()
     settings.warn_on_insecure_settings()
+    configure_logging("encosim", logs_dir=settings.logs_dir, level=settings.log_level)
 
-    logger.setLevel(settings.log_level)
     if settings.google_fake_provider:
         google = FakeGoogleVerifier()
     else:
@@ -69,11 +70,16 @@ def main():
     settings = get_settings()
     asyncio.run(preflight(settings))
     uvicorn.run(
-        "encosim_server.main:create_app",
+        "encosim_server.app:create_app",
         factory=True,
         host=settings.bind,
         port=settings.port,
         workers=settings.workers,
+        log_config=build_log_config(
+            "backend",
+            logs_dir=settings.logs_dir,
+            level=settings.log_level,
+        ),
     )
 
 

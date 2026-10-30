@@ -4,22 +4,26 @@ import sys
 import threading
 import time
 
+import uvicorn
+
+from encosim_server import app
 from encosim_server.app import preflight
 from encosim_server.core.settings import get_settings
+from encosim_server.logs import build_log_config, configure_logging
 from encosim_server.supervisor import Service, supervisor
 
 
 def main() -> int:
     """launch redis, celery and fastapi in development mode"""
+    settings = get_settings()
+    configure_logging("dev", logs_dir=settings.logs_dir, level=settings.log_level, tag="dev")
 
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
-    settings = get_settings()
     with supervisor(settings) as services:
         asyncio.run(preflight(settings))
-        time.sleep(1)
         services.append(
             Service(
                 "backend",
@@ -35,7 +39,7 @@ def main() -> int:
                     "--host",
                     settings.bind,
                 ],
-                logs_dir=settings.logs_dir,
+                # logs_dir=settings.logs_dir,
             )
         )
         while not stop.is_set() and all(s.alive() for s in services):

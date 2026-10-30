@@ -5,9 +5,11 @@ import redis
 import redis.asyncio as aioredis
 from celery import Celery, Task
 from celery.result import AsyncResult
+from celery.signals import setup_logging
 
 from encosim_server.core.settings import Settings, get_settings
 from encosim_server.database import make_redis_uri
+from encosim_server.logs import configure_logging
 
 # TODO: make task limiter a service and wrap celery with it
 
@@ -35,6 +37,16 @@ def create_celery(settings: Settings) -> PatchedCelery:
         task_hard_time_limit=int(settings.celery_hard_timeout.total_seconds()),
         result_extended=True,
     )
+
+    @setup_logging.connect(weak=False, dispatch_uid="encosim-logging")
+    def _configure_logging(**_):
+        configure_logging(
+            "celery",
+            logs_dir=settings.logs_dir,
+            level=settings.log_level,
+            celery_tasks=True,
+        )
+
     app.user_limiter = UserTaskLimiter(settings)
     return app
 
