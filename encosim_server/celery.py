@@ -1,4 +1,5 @@
-from typing import cast
+import sys
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import redis
@@ -7,7 +8,7 @@ from celery import Celery, Task
 from celery.result import AsyncResult
 
 from encosim_server.core.settings import Settings
-from encosim_server.database import make_redis_uri
+from encosim_server.database import get_redis_kwargs, make_redis_uri
 
 # TODO: make task limiter a service and wrap celery with it
 
@@ -32,9 +33,10 @@ def create_celery(settings: Settings) -> PatchedCelery:
         task_acks_late=True,
         task_reject_on_worker_lost=True,
         task_soft_time_limit=int(settings.celery_soft_timeout.total_seconds()),
-        task_hard_time_limit=int(settings.celery_hard_timeout.total_seconds()),
+        task_time_limit=int(settings.celery_hard_timeout.total_seconds()),  # the hard limit
         result_extended=True,
     )
+
     app.user_limiter = UserTaskLimiter(settings)
     return app
 
@@ -52,14 +54,9 @@ class UserTaskLimiter:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._async = aioredis.Redis(
-            unix_socket_path=str(settings.redis_conn),
-            decode_responses=True,
-        )
-        self._sync = redis.Redis(
-            unix_socket_path=str(settings.redis_conn),
-            decode_responses=True,
-        )
+        kwargs = get_redis_kwargs(settings)
+        self._async = aioredis.Redis(**kwargs)
+        self._sync = redis.Redis(**kwargs)
         self._acquire = self._async.register_script(_ACQUIRE)
 
     @property
@@ -91,7 +88,7 @@ class UserTaskLimiter:
             return False
         return bool(self._sync.sismember(self._key(user_id), task_id))
 
-    async def submit(self, task, user_id: UUID, **kwargs) -> AsyncResult | None:
+    async def submit(self, task: Any, user_id: UUID, **kwargs: Any) -> AsyncResult | None:
         """Enqueue a task. Returns the AsyncResult, or None if at the limit."""
         task = cast(Task, task)  # real task is a proxy for Task
         task_id = self.new_task_id(user_id)
@@ -123,3 +120,14 @@ class LimitedTask(Task):
         if status == "RETRY":  # still occupying its slot
             return
         self.app.user_limiter.release_sync(task_id)
+
+
+def main():
+    """Kept so that `python -m encosim_server.celery` (and `uv run celery`) still work."""
+    from encosim_server.cli import main as cli_main
+
+    raise SystemExit(cli_main(["worker", *sys.argv[1:]]))
+
+
+if __name__ == "__main__":
+    main()

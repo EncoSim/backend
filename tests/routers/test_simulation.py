@@ -1,10 +1,7 @@
 """Endpoint tests for the simulation router (/simu).
 
-Most tests swap the real simulator for the test tasks in tests/celery_tasks.py, so they are fast and
-deterministic, but everything else is real: FastAPI app, limiter, redis, worker process and result
-backend. Only `test_real_simulation_end_to_end` runs the actual simulator.
-
-DRAFT: not run yet.
+Only `test_real_simulation_end_to_end` runs the actual simulator.
+Others run fake tasks to keep tests deterministic and fast
 """
 
 from collections.abc import Awaitable, Callable
@@ -20,8 +17,9 @@ from httpx import AsyncClient
 
 from encosim_server.core.settings import Settings
 from tests import celery_tasks as tasks
-from tests.helpers import eventually, simulation_payload
-from tests.infra import gate_key
+from tests import infra
+from tests.helpers import eventually, is_running, simulation_payload
+from tests.infra import gate_key, running_pid
 from tests.routers.conftest import LoggedIn, LoginAs
 
 
@@ -279,6 +277,95 @@ async def test_runaway_simulation_is_reported_as_timed_out(
     router_wait.seconds = 5
     again = await alice.client.post("/simu", json=simulation_payload())
     assert again.json()["status"] == "success"
+
+# --- task aborting --------------------------------------------------------------------------------
+
+
+# @pytest.mark.skipif(not Path("/proc").exists(), reason="needs /proc")
+@pytest.mark.usefixtures("worker")
+async def test_a_running_job_that_ignores_signals_can_be_aborted(
+    login_as: LoginAs,
+    use_task: Callable[[Any], None],
+    router_wait: SimpleNamespace,
+    worker_process: infra.WorkerControl,
+):
+    use_task(tasks.unkillable_task)
+    router_wait.seconds = 0.5
+    alice = await login_as()
+    task_id = (await alice.client.post("/simu", json=simulation_payload())).json()["task_id"]
+    pid = await eventually(lambda: running_pid(worker_process, task_id), what="task running")
+
+    r = await alice.client.delete(f"/simu/{task_id}")
+
+    assert r.status_code == 200
+    await eventually(lambda: not is_running(pid), timeout=5, what="pool process killed")
+    status = await alice.client.get(f"/simu/{task_id}")
+    assert status.json() == {"status": "failed", "summary": "simulation aborted"}
+    assert await job_ids(alice) == []
+
+
+@pytest.mark.usefixtures("worker")
+async def test_a_queued_job_never_runs_once_it_is_aborted(
+    login_as: LoginAs,
+    use_task: Callable[[Any], None],
+    router_wait: SimpleNamespace,
+    redis_client: redis.Redis,
+    worker_process: infra.WorkerControl,
+):
+    router_wait.seconds = 0.2
+    alice = await login_as()
+    use_task(tasks.gated_task)
+    running = []
+    for _ in range(2):  # the test worker runs two tasks at a time (WORKER_ARGS in conftest.py)
+        r = await alice.client.post("/simu", json=simulation_payload())
+        running.append(r.json()["task_id"])
+    use_task(tasks.summary_task)  # would end as "success" if the worker ever ran it
+    queued = (await alice.client.post("/simu", json=simulation_payload())).json()["task_id"]
+
+    assert (await alice.client.delete(f"/simu/{queued}")).status_code == 200
+    for task_id in running:
+        redis_client.set(gate_key(task_id), 1, ex=60)
+    await eventually(lambda: no_jobs(alice), what="running jobs finished")
+    worker_process.wait_idle(timeout=15)  # the worker has gone through its queue
+
+    status = await alice.client.get(f"/simu/{queued}")
+    assert status.json() == {"status": "failed", "summary": "simulation aborted"}
+
+
+@pytest.mark.usefixtures("worker")
+async def test_only_the_owner_can_abort_a_job(
+    login_as: LoginAs, use_task: Callable[[Any], None], router_wait: SimpleNamespace
+):
+    use_task(tasks.gated_task)
+    router_wait.seconds = 0.2
+    alice, bob = await login_as("google:alice"), await login_as("google:bob")
+    task_id = (await alice.client.post("/simu", json=simulation_payload())).json()["task_id"]
+    unknown = f"{alice.user.user_id.hex}+{uuid4().hex}"
+
+    for user, target in ((bob, task_id), (alice, unknown), (alice, "garbage")):
+        r = await user.client.delete(f"/simu/{target}")
+        assert r.status_code == 404, target
+        assert r.json()["code"] == "not_found"
+    assert await job_ids(alice) == [task_id]  # still there, still running
+
+
+@pytest.mark.usefixtures("worker")
+async def test_a_finished_job_cannot_be_aborted(
+    login_as: LoginAs,
+    use_task: Callable[[Any], None],
+    router_wait: SimpleNamespace,
+    redis_client: redis.Redis,
+):
+    use_task(tasks.gated_task)
+    router_wait.seconds = 0.2
+    alice = await login_as()
+    task_id = (await alice.client.post("/simu", json=simulation_payload())).json()["task_id"]
+    redis_client.set(gate_key(task_id), 1, ex=60)
+    await eventually(lambda: no_jobs(alice), what="job finished")
+
+    r = await alice.client.delete(f"/simu/{task_id}")
+
+    assert r.status_code == 404  # its slot is gone, so there is nothing to abort
 
 
 # --- the real simulator ---------------------------------------------------------------------------

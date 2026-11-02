@@ -12,7 +12,7 @@ router = APIRouter(prefix="/chars/private", tags=["characters"])
 def downgrade(full: CharInDB) -> CharDownload:
     return CharDownload.model_validate(full, from_attributes=True, extra="ignore")
 
-@router.get("")
+@router.get("", responses=errors.to_responses(errors.Unauthorized))
 async def list_characters(res: ResourcesDep, user: ActiveUserDep) -> ManyCharDownload:
     return ManyCharDownload(
         characters=[downgrade(c) for c in await res.characters.list(user.user_id)]

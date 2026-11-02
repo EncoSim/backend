@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Any, TypedDict
 from urllib.parse import quote_plus
 
 import pymongo
@@ -22,13 +23,22 @@ def make_redis_uri(settings: Settings) -> str:
     # celery needs special format
     return f"redis+socket://{settings.redis_conn}"
 
+class RedisArgs(TypedDict):
+    unix_socket_path: str
+    decode_responses: bool
+
+
+def get_redis_kwargs(settings: Settings) -> RedisArgs:
+    return RedisArgs(
+        unix_socket_path=str(settings.redis_conn),
+        decode_responses=True,
+    )
 
 async def health_check_redis(settings: Settings, timeout: float = 5):
     redis = Redis(
-        unix_socket_path=str(settings.redis_conn),
+        **get_redis_kwargs(settings),
         socket_connect_timeout=timeout,
         socket_timeout=timeout,
-        decode_responses=True,
     )
     try:
         if not await redis.ping():
@@ -48,7 +58,7 @@ def make_mongo_uri(settings: Settings) -> str:
     return f"mongodb://{user}:{pw}@{sock}/{db}?replicaSet={rs}&authSource=admin"
 
 
-async def create_indexes(db: AsyncDatabase) -> None:
+async def create_indexes(db: AsyncDatabase[Any]) -> None:
     # TODO: easier way to keep in sync?
     # should very rarely change outside of early development
     await db[CHARACTERS].create_index("owner_id")
@@ -64,7 +74,7 @@ async def health_check_mongo(settings: Settings, timeout: float = 5):
             async with connect_mongo(settings) as db:
                 res = await db.command("ping")
                 if res.get("ok") == 1.0:
-                    logger.info("Connected to MongoDB", res)
+                    logger.info("Connected to MongoDB")
                     return
                 else:
                     raise RuntimeError(f"Unexpected ping response from MongoDB: {res}")

@@ -1,4 +1,3 @@
-
 import pytest
 
 from encosim_server.resources import Resources

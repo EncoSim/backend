@@ -18,6 +18,9 @@ from encosim_server.simulation.schemas import (
 )
 from encosim_server.simulation.tasks import handle_simulation
 
+logger = logging.getLogger(__name__)
+
+
 router = APIRouter(prefix="/simu", tags=["simu"])
 
 
@@ -67,6 +70,7 @@ async def simulate(
 async def job_list(res: ResourcesDep, user: ActiveUserDep) -> SimulationList:
     return SimulationList(ids=list(await res.celery.user_limiter.active(user.user_id)))
 
+
 COMMON = (errors.Unauthorized, errors.NotFound)
 
 
@@ -83,9 +87,25 @@ async def job_status(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> Si
         res.celery.user_limiter.release_sync(task_id)
     return summary
 
-# TODO: add job aborting
 
-logger = logging.getLogger(__name__)
+@router.delete("/{task_id}", responses=errors.to_responses(*COMMON))
+async def abort_job(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> None:
+    limiter = res.celery.user_limiter
+    if not limiter.task_belongs_to(task_id, user.user_id) or not limiter.task_exists(task_id):
+        raise errors.NotFound()
+
+    def abort():
+        res.celery.control.revoke(task_id, terminate=True, signal="SIGKILL")
+        # Record the state ourselves: a task that is still queued only becomes REVOKED when
+        # a worker picks it up, and until then job_status would answer 404 (slot released,
+        # state PENDING)
+        if res.celery.backend is None:
+            return
+        res.celery.backend.mark_as_revoked(task_id, reason="aborted by user")
+        # killed pool process cannot run LimitedTask.after_return, so release the slot here
+        limiter.release_sync(task_id)
+
+    await run_in_threadpool(abort)
 
 
 def summarize(result: AsyncResult, task_id: str) -> SimulationResult:
@@ -104,6 +124,9 @@ def summarize(result: AsyncResult, task_id: str) -> SimulationResult:
             status="failed",
             summary="simulation timed out" if has_timed_out else "critical failure",
         )
+
+    if result.state == "REVOKED":
+        return SimulationFinished(status="failed", summary="simulation aborted")
 
     if result.successful():
         return SimulationFinished(status="success", summary=result.result)

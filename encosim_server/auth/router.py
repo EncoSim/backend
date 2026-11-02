@@ -76,10 +76,17 @@ async def list_sessions(res: ResourcesDep, user: ActiveUserDep) -> ManySessionsS
     return ManySessionsSchema(sessions=await res.sessions.list_user_sessions(user.user_id))
 
 
-@router.delete("/sessions", responses=errors.to_responses(*COMMON))
-async def terminate_all_sessions(res: ResourcesDep, user: ActiveUserDep):
+@router.delete(
+    "/sessions",
+    responses=errors.to_responses(*COMMON),
+    description="Terminates all sessions, including the current one. User is logged out.",
+)
+async def terminate_all_sessions(
+    res: ResourcesDep, user: ActiveUserDep, request: Request, response: Response
+):
     await res.sessions.terminate_all_for_user(user.user_id)
-
+    await res.auth.logout(request.cookies.get(res.settings.cookie_name))
+    clear_refresh_cookie(request, response, res.settings)
 
 @router.delete("/sessions/{session_id}", responses=errors.to_responses(*COMMON, errors.NotFound))
 async def terminate_session(res: ResourcesDep, session_id: UUID4, user: ActiveUserDep):

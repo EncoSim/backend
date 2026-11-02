@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.app import create_app
-from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
 from encosim_server.users.models import UserInDB
@@ -28,7 +27,7 @@ async def app(settings: Settings, db: AsyncDatabase[Any]):
     # depending on the db fixture here cleans up the database for the next test.
     # `pytest.mark.usefixtures` is not allowed on fixtures
     _ = db
-    application = create_app(settings, google=FakeGoogleVerifier())
+    application = create_app(settings)  # the fake google verifier comes from the settings
     async with LifespanManager(application) as manager:
         yield manager.app
 
@@ -81,7 +80,7 @@ async def login_as(resources: Resources, make_client: Callable[..., httpx.AsyncC
     admin = await login_as("google:root", roles=["user", "admin"])
     r = await alice.client.get("/me")
     """
-    from encosim_server.core.security import create_access_token  # ADAPT: name/location
+    from encosim_server.core.security import create_access_token
 
     async def _login(
         login_id: str = "google:alice",

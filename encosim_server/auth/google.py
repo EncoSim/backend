@@ -1,5 +1,5 @@
 import asyncio
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests as g_requests
@@ -9,7 +9,7 @@ from encosim_server.core import errors
 from encosim_server.users.schemas import UserProfile
 
 
-def string_to_bool(s) -> bool:
+def string_to_bool(s: Any) -> bool:
     return isinstance(s, str) and s.lower() == "true"
 
 

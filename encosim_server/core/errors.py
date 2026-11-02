@@ -23,7 +23,7 @@ class ApiError(Exception):
     # generated
     body_model: ClassVar[type[BaseModel]]
 
-    def __init_subclass__(cls, *, abstract: bool = False, **kwargs):
+    def __init_subclass__(cls, *, abstract: bool = False, **kwargs: Any):
         super().__init_subclass__(**kwargs)
         if abstract:
             return

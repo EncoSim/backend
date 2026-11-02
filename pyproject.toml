@@ -18,14 +18,13 @@ dependencies = [
 ]
 
 [project.scripts]
+bootstrap = "encosim_server.scripts.bootstrap:main"
+celery = "encosim_server.cli:worker_main"  # alias of `encosim worker`
 character = "encosim_server.scripts.export:default_character"
-dev = "encosim_server.scripts.dev:backend"
-dev-celery = "encosim_server.scripts.dev:celery"
+dev = "encosim_server.cli:dev_main"  # alias of `encosim dev`
+encosim = "encosim_server.cli:main"
+main = "encosim_server.cli:serve_main"  # alias of `encosim serve`
 openapi = "encosim_server.scripts.export:openapi_json"
-production = "encosim_server.scripts.production:backend"
-production-celery = "encosim_server.scripts.production:celery"
-staging = "encosim_server.scripts.staging:backend"
-staging-celery = "encosim_server.scripts.staging:celery"
 
 [dependency-groups]
 dev = [

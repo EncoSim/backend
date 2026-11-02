@@ -1,12 +1,3 @@
-"""Tests for CharacterService (DRAFT, not run).
-
-Needs `clock` to patch `utcnow` in encosim_server.characters.service as well
-(see the notes in the chat message).
-
-ADAPT: `upload()` builds a CharUpload. I only know that the schema has `data` and `version`
-(from service.py); adjust it if `data` is not a plain dict or if more fields are required.
-"""
-
 import asyncio
 import logging
 from typing import Any

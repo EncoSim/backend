@@ -4,7 +4,7 @@ import sys
 from encosim import EntityConfig
 from encosim.core.entity_config import create_default
 
-from encosim_server.app import create_app
+from encosim_server.app import factory
 
 
 def default_character():
@@ -13,7 +13,7 @@ def default_character():
 
 
 def openapi_json():
-    app = create_app()
+    app = factory()
     schema = app.openapi()
     json.dump(schema, sys.stdout)
     sys.stdout.write("\n")

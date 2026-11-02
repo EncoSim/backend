@@ -1,10 +1,3 @@
-"""Tests for the celery integration: `UserTaskLimiter`, `LimitedTask` and a real worker.
-
-The limiter tests only need the private redis. The worker tests use the `worker` fixture, which
-runs a real worker process (see conftest.py and tests/worker.py), so they cover serialization,
-the result backend and the time limits for real.
-"""
-
 import asyncio
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +8,7 @@ import redis
 from celery.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from celery.result import AsyncResult
 
+import encosim_server.simulation.tasks  # noqa: F401  (registers handle_simulation)
 from encosim_server.celery import UserTaskLimiter
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
@@ -145,6 +139,20 @@ def test_app_is_configured_for_reliable_delivery(resources: Resources):
     assert conf.accept_content == ["json"]
 
 
+def test_time_limits_from_settings_reach_celery(resources: Resources, settings: Settings):
+    conf = resources.celery.conf
+    assert conf.task_soft_time_limit == settings.celery_soft_timeout.total_seconds()
+    assert conf.task_time_limit == settings.celery_hard_timeout.total_seconds()  # the hard limit
+
+
+@pytest.mark.xfail(reason="timeout is set by app, not by the task itself")
+def test_simulation_task_has_both_time_limits(resources: Resources, settings: Settings):
+    task = resources.celery.tasks["encosim_server.simulation.tasks.handle_simulation"]
+
+    assert task.soft_time_limit == settings.celery_soft_timeout.total_seconds()
+    assert task.time_limit == settings.celery_hard_timeout.total_seconds()
+
+
 # --- worker --------------------------------------------------------------------------------------
 
 
@@ -216,11 +224,9 @@ async def test_soft_time_limit_stops_a_task_that_listens(resources: Resources):
 
 
 @pytest.mark.usefixtures("worker")
-async def test_hard_time_limit_stops_a_task_that_ignores_all_signals(
-    resources: Resources, settings: Settings
-):
+async def test_hard_time_limit_stops_a_task_that_ignores_all_signals(resources: Resources):
     user = uuid4()
-    hard = settings.celery_hard_timeout.total_seconds()
+    hard = tasks.SHORT["time_limit"]
 
     stuck = await finished(await submit(resources, tasks.stubborn_task, user), timeout=hard + 10)
 

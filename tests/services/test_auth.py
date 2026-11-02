@@ -1,12 +1,3 @@
-"""Tests for AuthService (DRAFT, not run).
-
-Everything marked ADAPT depends on code I have not seen:
-  * StubGoogle: I assume `GoogleVerifier.verify()` returns `(login_id, UserProfile)`
-  * claims_of(): how your access token is decoded and what its claims are called
-  * the `ban_status.banned` field name used for the raw ban
-  * where UserProfile / the exceptions live
-"""
-
 from typing import Any
 
 import pytest
@@ -175,7 +166,7 @@ async def test_banned_user_cannot_refresh_and_loses_all_sessions(
     await login(auth, user_agent=FIREFOX_LINUX)
     user_id = laptop.user.user_id
     # flag the user directly: users.ban() would already end the sessions, hiding this code path
-    await db[USERS].update_one({"_id": user_id}, {"$set": {"ban_status.banned": True}})  # ADAPT
+    await db[USERS].update_one({"_id": user_id}, {"$set": {"ban_status.banned": True}})
 
     with pytest.raises(errors.InvalidSession):
         await auth.refresh(laptop.refresh_token)

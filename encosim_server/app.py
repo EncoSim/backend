@@ -1,51 +1,36 @@
-import logging
 import sys
 import warnings
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TypedDict
 
 from fastapi import FastAPI
-from uvicorn.logging import DefaultFormatter
 
-from encosim_server.auth.google import GoogleVerifier, RealGoogleVerifier
+from encosim_server.auth.google import FakeGoogleVerifier, RealGoogleVerifier
 from encosim_server.auth.router import router as auth_router
 from encosim_server.characters.router import router as char_router
 from encosim_server.core import errors
-from encosim_server.core.settings import Settings, warn_on_insecure_settings
-from encosim_server.database import connect_mongo, health_check_mongo, health_check_redis
+from encosim_server.core.settings import Settings
+from encosim_server.database import connect_mongo
 from encosim_server.resources import Resources, build_resources
 from encosim_server.simulation.router import router as simu_router
 from encosim_server.users.router import router as user_router
-
-# setup logger
-logger = logging.getLogger("encosim_server")
-logger.setLevel(logging.INFO)
-
-handler = logging.StreamHandler(stream=sys.stdout)
-handler.setFormatter(DefaultFormatter(fmt="%(levelprefix)s %(message)s", use_colors=True))
-logger.addHandler(handler)
 
 
 class AppState(TypedDict):
     resources: Resources
 
 
-def create_app(settings: Settings | None = None, google: GoogleVerifier | None = None) -> FastAPI:
+def create_app(settings: Settings) -> FastAPI:
+    """Build the application. No side effects: logging and checks belong to `startup`."""
     # https://github.com/Kludex/fastapi-tips?tab=readme-ov-file#6-use-lifespan-state-instead-of-appstate
 
-    if settings is None:
-        settings = Settings()  # type: ignore
-    warn_on_insecure_settings(settings)
-    if google is None:
+    if settings.google_fake_provider:
+        google = FakeGoogleVerifier()
+    else:
         google = RealGoogleVerifier(settings.google_client_id)
-    if not isinstance(google, RealGoogleVerifier):
-        logger.warning("Using fake google authentication!")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        logger.setLevel(settings.log_level)
-
         async with connect_mongo(settings) as mongo:
             yield AppState(resources=build_resources(settings, google, mongo))
 
@@ -53,22 +38,25 @@ def create_app(settings: Settings | None = None, google: GoogleVerifier | None =
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
         app = FastAPI(lifespan=lifespan, debug=True, root_path="/api")
+
     app.add_exception_handler(errors.ApiError, errors.handle_api_error)  # type: ignore
     for router in (auth_router, char_router, user_router, simu_router):
         app.include_router(router)
     return app
 
 
-def load_settings_from_env_file(env_fp: str | Path) -> Settings:
-    env_fp = Path(env_fp)
-    if not env_fp.is_file():
-        raise FileNotFoundError(f"Could not find environment file {env_fp}")
-    settings = Settings(_env_file=env_fp)  # type: ignore - linter cannot know runtime variables
-    return settings
+def factory() -> FastAPI:
+    """Argument-less factory for uvicorn: reloader and workers import the app in fresh processes,
+    where the settings come from `$ENCOSIM_ENV_FILE` (see `Settings.load`)."""
+    return create_app(Settings.load())
 
 
-async def preflight(settings: Settings | None = None):
-    if settings is None:
-        settings = Settings()  # type:ignore
-    await health_check_mongo(settings)
-    await health_check_redis(settings)
+def main():
+    """Kept so that `python -m encosim_server.app` (used by the supervisord config) still works."""
+    from encosim_server.cli import main as cli_main
+
+    raise SystemExit(cli_main(["serve", *sys.argv[1:]]))
+
+
+if __name__ == "__main__":
+    main()

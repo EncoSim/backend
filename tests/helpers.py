@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import time
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -56,3 +57,11 @@ def simulation_payload(
     """Request body for POST /simu: one team per entry of `team_sizes`."""
     entity = create_default().model_dump(mode="json")
     return {"repetitions": repetitions, "teams": [[entity] * n for n in team_sizes]}
+
+
+def is_running(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return False
+    return state != "Z"  # a zombie is dead, it just has not been reaped yet

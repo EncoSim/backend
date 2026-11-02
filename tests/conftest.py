@@ -8,15 +8,18 @@ tests are isolated, may run in parallel and never touch your dev data. The Mongo
 needs the rights to create and drop databases.
 
 Redis is not taken from `.env.test`: the suite starts its own `redis-server` on a private unix
-socket. Tests that need celery also get a real worker process, see
-`worker`. MongoDB must already be running.
+socket, and a celery worker for the tests that need one (`worker`). Both are started by the same
+supervisor as `encosim dev`, in a scratch directory that is removed afterwards. MongoDB must
+already be running.
 """
 
 import asyncio
 import gc
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 from collections.abc import Iterator
 from datetime import timedelta
@@ -30,11 +33,13 @@ import redis
 from _pytest.monkeypatch import MonkeyPatch
 from pymongo.asynchronous.database import AsyncDatabase
 
+from encosim_server import PROJECT_ROOT
 from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.core import security
 from encosim_server.core.settings import Settings
-from encosim_server.database import SESSIONS, connect_mongo, health_check_mongo
+from encosim_server.database import SESSIONS, connect_mongo, get_redis_kwargs, health_check_mongo
 from encosim_server.resources import Resources, build_resources
+from encosim_server.supervisor import Service, Supervisor, stack_specs
 from tests import infra
 
 logger = logging.getLogger(__name__)
@@ -81,14 +86,25 @@ PINNED_SETTINGS = {
     "max_sessions_per_user": 3,
     "auto_promote_to_admin": ["admin@example.com"],
     "cookie_path": "/auth",
+    "google_fake_provider": True,
     # simulation limits
     "max_simulations": 3,
     "max_simulation_participants": 4,
     "max_simulation_repetitions": 5,
-    # celery
-    "celery_soft_timeout": timedelta(seconds=2),
-    "celery_hard_timeout": timedelta(seconds=4),
+    # celery: generous, the real simulator runs under these. The tasks in tests/celery_tasks.py
+    # that are meant to hit a limit set their own short ones.
+    "celery_soft_timeout": timedelta(seconds=60),
+    "celery_hard_timeout": timedelta(seconds=90),
 }
+
+WORKER_ARGS = (
+    "--pool=prefork",  # the only pool that enforces time limits and can kill a stuck task
+    "--concurrency=2",
+    "--hostname=test@%h",
+    "--without-gossip",
+    "--without-mingle",
+    "--without-heartbeat",
+)
 
 
 # --- settings and database ------------------------------------------------------------------------
@@ -98,7 +114,7 @@ PINNED_SETTINGS = {
 def load_base_settings() -> Settings:
     if not ENV_FILE.is_file():
         raise RuntimeError(f"{ENV_FILE} not found: add .env.test to the directory")
-    settings = Settings(_env_file=ENV_FILE)  # type: ignore
+    settings = Settings.load(ENV_FILE)
 
     user = settings.mongo_user
     db = settings.mongo_db
@@ -124,23 +140,54 @@ def pytest_sessionstart():
 
 
 @pytest.fixture(scope="session")
-def redis_server() -> Iterator[infra.RedisServer]:
-    """Private redis-server on a unix socket in a temp dir"""
-    server = infra.start_redis()
-    yield server
-    server.stop()
+def run_dir() -> Iterator[Path]:
+    """Scratch directory for sockets and logs.
 
-
-@pytest.fixture(scope="session", autouse=True)
-def _finalize_celery_results_before_redis_stops(redis_server: infra.RedisServer) -> Iterator[None]:
-    yield
-    gc.collect()  # runs before redis_server is torn down
+    Under /tmp, not pytest's tmp dirs: unix socket paths are limited to ~100 characters.
+    """
+    path = Path(tempfile.mkdtemp(prefix="encosim-", dir="/tmp"))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
-def settings(redis_server: infra.RedisServer) -> Settings:
-    update = {**PINNED_SETTINGS, "redis_conn": redis_server.sock}
+def settings(run_dir: Path) -> Settings:
+    update = {
+        **PINNED_SETTINGS,
+        "redis_conn": run_dir / "redis.sock",
+        "logs_dir": run_dir / "logs",
+    }
     return load_base_settings().model_copy(update=update)
+
+
+@pytest.fixture(scope="session")
+def stack(settings: Settings) -> Iterator[Supervisor]:
+    """redis and the celery worker, managed by the supervisor `encosim dev` uses.
+
+    Nothing runs until a fixture asks for it (`redis_server`, `worker_process`).
+    """
+    specs = stack_specs(
+        settings,
+        services=("redis", "celery"),
+        include=("tests.celery_tasks",),  # the tasks of tests/celery_tasks.py
+        celery_args=WORKER_ARGS,
+        cwd=PROJECT_ROOT,  # so that `tests` can be imported
+    )
+    with Supervisor(settings, specs, echo=False) as supervisor:
+        yield supervisor
+
+
+@pytest.fixture(scope="session")
+def redis_server(stack: Supervisor):
+    return stack.ensure("redis")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _finalize_celery_results_before_redis_stops(redis_server: Service) -> Iterator[None]:
+    yield
+    # runs before the stack is torn down
+    # otherwise celery retries tasks before/during teardown, but cannot connect to redis backend
+    gc.collect()
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -172,32 +219,32 @@ async def disable_ttl_cleanup(db: AsyncDatabase[Any]) -> AsyncIterator[None]:
 
 
 @pytest.fixture(scope="session")
-def worker_process(settings: Settings, redis_server: infra.RedisServer) -> Iterator[infra.Worker]:
+def worker_process(stack: Supervisor, settings: Settings) -> infra.WorkerControl:
     """Real celery worker (separate process, prefork pool) on the private redis.
 
     Started lazily by the first test that asks for `worker`.
     """
-    worker = infra.start_worker(settings, ENV_FILE, redis_server.dir / "worker.log")
-    yield worker
-    worker.stop()
+    return infra.WorkerControl(settings, stack.ensure("celery"))
 
 
 @pytest.fixture
-def worker(worker_process: infra.Worker, settings: Settings) -> Iterator[infra.Worker]:
+def worker(
+    worker_process: infra.WorkerControl, settings: Settings
+) -> Iterator[infra.WorkerControl]:
     """Use in every test that submits tasks.
 
     Afterwards it lets gated tasks finish, waits until the worker is idle (hard timeout plus margin)
     and removes leftover results and limiter entries, so tests cannot influence each other.
     """
     yield worker_process
-    infra.open_all_gates(settings.redis_conn)
+    infra.open_all_gates(settings)
     worker_process.wait_idle(timeout=settings.celery_hard_timeout.total_seconds() + 10)
-    infra.clean_redis(settings.redis_conn)
+    infra.clean_redis(settings)
 
 
 @pytest.fixture
 def redis_client(settings: Settings) -> Iterator[redis.Redis]:
-    client = redis.Redis(unix_socket_path=str(settings.redis_conn), decode_responses=True)
+    client = redis.Redis(**get_redis_kwargs(settings))
     yield client
     client.close()
 
