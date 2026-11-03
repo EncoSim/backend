@@ -28,14 +28,14 @@ def use_task(monkeypatch: MonkeyPatch):
     """Make POST /simu run a test task instead of the real simulator."""
 
     def use(task: Any):
-        monkeypatch.setattr("encosim_server.simulation.router.handle_simulation", task)
+        monkeypatch.setattr("encosim_server.simulation.service.handle_simulation", task)
 
     return use
 
 
 @pytest.fixture
 def router_wait(monkeypatch: MonkeyPatch):
-    """Cap how long POST /simu waits for a result (the router hard-codes 15 s).
+    """Cap how long POST /simu waits for a result (the service defaults to 15 s).
 
     Tests can change `router_wait.seconds`; the default is generous enough for a cold worker.
     """
@@ -269,6 +269,11 @@ async def test_runaway_simulation_is_reported_as_timed_out(
 
     done = await eventually(lambda: _not_pending(status()), timeout=20, what="job timed out")
     assert done == {"status": "failed", "summary": "simulation timed out"}
+    history = await alice.client.get("/simu/history")
+    assert any(
+        item["task_id"] == task_id and item["summary"] == "simulation timed out"
+        for item in history.json()
+    )
 
     # polling a finished job frees its slot (a killed process cannot do that itself) ...
     assert await job_ids(alice) == []
@@ -330,6 +335,11 @@ async def test_a_queued_job_never_runs_once_it_is_aborted(
 
     status = await alice.client.get(f"/simu/{queued}")
     assert status.json() == {"status": "failed", "summary": "simulation aborted"}
+    history = await alice.client.get("/simu/history")
+    assert any(
+        item["task_id"] == queued and item["summary"] == "simulation aborted"
+        for item in history.json()
+    )
 
 
 @pytest.mark.usefixtures("worker")
@@ -367,6 +377,89 @@ async def test_a_finished_job_cannot_be_aborted(
 
     assert r.status_code == 404  # its slot is gone, so there is nothing to abort
 
+
+
+@pytest.mark.usefixtures("worker")
+async def test_finished_history_keeps_configuration_and_result(
+    login_as: LoginAs, use_task: Callable[[Any], None]
+):
+    use_task(tasks.summary_task)
+    alice = await login_as()
+    config = simulation_payload(repetitions=3)
+
+    submitted = await alice.client.post("/simu", json=config)
+    assert submitted.status_code == 200
+    assert submitted.json() == {"status": "success", "summary": "repetitions=3"}
+
+    history = await alice.client.get("/simu/history")
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+    record = history.json()[0]
+    assert record["status"] == "success"
+    assert record["config"] == config
+    assert record["result"] == "repetitions=3"
+    assert record["summary"] == "repetitions=3"
+    task_id = record["task_id"]
+
+    fetched = await alice.client.get(f"/simu/history/{task_id}")
+    assert fetched.status_code == 200
+    assert fetched.json() == record
+
+    deleted = await alice.client.delete(f"/simu/history/{task_id}")
+    assert deleted.status_code == 200
+    assert (await alice.client.get("/simu/history")).json() == []
+
+
+@pytest.mark.usefixtures("worker")
+async def test_failed_simulations_are_kept_in_history(
+    login_as: LoginAs, use_task: Callable[[Any], None]
+):
+    use_task(tasks.failing_task)
+    alice = await login_as()
+
+    submitted = await alice.client.post("/simu", json=simulation_payload())
+    assert submitted.status_code == 200
+    assert submitted.json() == {"status": "failed", "summary": "critical failure"}
+
+    history = await alice.client.get("/simu/history")
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+    assert history.json()[0]["status"] == "failed"
+    assert history.json()[0]["config"] == simulation_payload()
+    assert history.json()[0]["result"] is None
+
+
+@pytest.mark.usefixtures("worker")
+async def test_history_retains_only_the_latest_ten_per_user(
+    login_as: LoginAs, use_task: Callable[[Any], None]
+):
+    use_task(tasks.summary_task)
+    alice = await login_as()
+    for _ in range(11):
+        response = await alice.client.post("/simu", json=simulation_payload())
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+    history = await alice.client.get("/simu/history")
+    assert history.status_code == 200
+    assert len(history.json()) == 10
+
+
+@pytest.mark.usefixtures("worker")
+async def test_finished_history_is_private(
+    login_as: LoginAs, use_task: Callable[[Any], None]
+):
+    use_task(tasks.summary_task)
+    alice = await login_as("google:alice")
+    bob = await login_as("google:bob")
+    submitted = await alice.client.post("/simu", json=simulation_payload())
+    assert submitted.status_code == 200
+    record = (await alice.client.get("/simu/history")).json()[0]
+    task_id = record["task_id"]
+
+    assert (await bob.client.get("/simu/history")).json() == []
+    assert (await bob.client.get(f"/simu/history/{task_id}")).status_code == 404
+    assert (await bob.client.delete(f"/simu/history/{task_id}")).status_code == 404
 
 # --- the real simulator ---------------------------------------------------------------------------
 

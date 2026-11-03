@@ -40,7 +40,7 @@ def serve(settings: Settings, *, reload: bool = False):
 
 def worker(settings: Settings, *, include: Sequence[str] = (), celery_args: Sequence[str] = ()):
     """Run a celery worker. `include` names extra modules with tasks (the tests use this)."""
-    startup(settings, "celery", celery_tasks=True, mongo=False)
+    startup(settings, "celery", celery_tasks=True)
     for module in include:
         importlib.import_module(module)
     app = create_celery(settings)

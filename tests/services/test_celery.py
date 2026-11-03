@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,33 +8,20 @@ from celery.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from celery.result import AsyncResult
 
 import encosim_server.simulation.tasks  # noqa: F401  (registers handle_simulation)
-from encosim_server.celery import UserTaskLimiter
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
+from encosim_server.simulation.limiter import SimulationLimiter
+from encosim_server.simulation.schemas import SimulationConfig
 from tests import celery_tasks as tasks
-from tests.helpers import eventually
+from tests.helpers import eventually, simulation_payload
 from tests.infra import gate_key
 
 CONFIG = {"repetitions": 2}
 
 
-class FakeTask:
-    """Stands in for a celery task: `submit` only calls `apply_async`."""
-
-    def __init__(self, fail: bool = False):
-        self.fail = fail
-        self.sent: list[tuple[str, dict[str, Any]]] = []
-
-    def apply_async(self, kwargs: dict[str, Any], task_id: str):
-        if self.fail:
-            raise ConnectionError("broker is down")
-        self.sent.append((task_id, kwargs))
-        return SimpleNamespace(id=task_id)
-
-
 @pytest.fixture
-def limiter(resources: Resources) -> UserTaskLimiter:
-    return resources.celery.user_limiter
+def limiter(resources: Resources) -> SimulationLimiter:
+    return resources.celery.simulation_limiter
 
 
 # --- task ids ------------------------------------------------------------------------------------
@@ -43,98 +29,108 @@ def limiter(resources: Resources) -> UserTaskLimiter:
 
 def test_task_id_encodes_its_owner():
     alice, bob = uuid4(), uuid4()
-    task_id = UserTaskLimiter.new_task_id(alice)
+    task_id = SimulationLimiter.new_task_id(alice)
 
-    assert UserTaskLimiter.user_id_from_task_id(task_id) == alice
-    assert UserTaskLimiter.task_belongs_to(task_id, alice)
-    assert not UserTaskLimiter.task_belongs_to(task_id, bob)
-    assert UserTaskLimiter.new_task_id(alice) != task_id
+    assert SimulationLimiter.user_id_from_task_id(task_id) == alice
+    assert SimulationLimiter.task_belongs_to(task_id, alice)
+    assert not SimulationLimiter.task_belongs_to(task_id, bob)
+    assert SimulationLimiter.new_task_id(alice) != task_id
 
 
 def test_task_id_without_owner_is_not_recognized():
-    assert UserTaskLimiter.user_id_from_task_id("no-separator") is None
+    assert SimulationLimiter.user_id_from_task_id("no-separator") is None
 
 
 # --- limiter (redis only) ---------------------------------------------------------------------
 
 
-async def test_submit_registers_the_task_for_its_user(limiter: UserTaskLimiter):
-    user, task = uuid4(), FakeTask()
+async def test_acquire_registers_the_task_for_its_user(limiter: SimulationLimiter):
+    user = uuid4()
 
-    result = await limiter.submit(task, user, config=CONFIG)
+    task_id = await limiter.acquire(user)
 
-    assert result is not None
-    assert task.sent == [(result.id, {"config": CONFIG})]
-    assert isinstance(result.id, str)
-    assert UserTaskLimiter.task_belongs_to(result.id, user)
-    assert limiter.task_exists(result.id)
-    assert await limiter.active(user) == {result.id}
+    assert isinstance(task_id, str)
+    assert SimulationLimiter.task_belongs_to(task_id, user)
+    assert limiter.task_exists(task_id)
+    assert await limiter.active(user) == {task_id}
 
 
-def test_unknown_task_does_not_exist(limiter: UserTaskLimiter):
-    assert not limiter.task_exists(UserTaskLimiter.new_task_id(uuid4()))
+def test_unknown_task_does_not_exist(limiter: SimulationLimiter):
+    assert not limiter.task_exists(SimulationLimiter.new_task_id(uuid4()))
     assert not limiter.task_exists("no-separator")
 
 
-async def test_submit_refuses_beyond_the_limit(limiter: UserTaskLimiter):
-    user, task = uuid4(), FakeTask()
+async def test_acquire_refuses_beyond_the_limit(limiter: SimulationLimiter):
+    user = uuid4()
     for _ in range(limiter.limit):
-        assert await limiter.submit(task, user, config=CONFIG) is not None
+        assert await limiter.acquire(user) is not None
 
-    assert await limiter.submit(task, user, config=CONFIG) is None
-    assert len(task.sent) == limiter.limit  # the refused one never reached the broker
+    assert await limiter.acquire(user) is None
 
 
-async def test_limit_is_per_user(limiter: UserTaskLimiter):
-    alice, bob, task = uuid4(), uuid4(), FakeTask()
+async def test_limit_is_per_user(limiter: SimulationLimiter):
+    alice, bob = uuid4(), uuid4()
     for _ in range(limiter.limit):
-        await limiter.submit(task, alice, config=CONFIG)
+        await limiter.acquire(alice)
 
-    assert await limiter.submit(task, bob, config=CONFIG) is not None
+    assert await limiter.acquire(bob) is not None
 
 
-async def test_release_gives_the_slot_back(limiter: UserTaskLimiter):
-    user, task = uuid4(), FakeTask()
-    results = [await limiter.submit(task, user, config=CONFIG) for _ in range(limiter.limit)]
-    assert await limiter.submit(task, user, config=CONFIG) is None
+async def test_release_gives_the_slot_back(limiter: SimulationLimiter):
+    user = uuid4()
+    task_ids = [await limiter.acquire(user) for _ in range(limiter.limit)]
+    assert await limiter.acquire(user) is None
 
-    first = results[0]
+    first = task_ids[0]
     assert first is not None
-    assert isinstance(first.id, str)
-    limiter.release_sync(first.id)
-    limiter.release_sync(first.id)  # releasing twice is harmless
+    limiter.release_sync(first)
+    limiter.release_sync(first)  # releasing twice is harmless
     limiter.release_sync("no-separator")  # so are ids we do not know
 
-    assert not limiter.task_exists(first.id)
-    assert await limiter.submit(task, user, config=CONFIG) is not None
+    assert not limiter.task_exists(first)
+    assert await limiter.acquire(user) is not None
 
 
-async def test_failed_publish_gives_the_slot_back(limiter: UserTaskLimiter):
+async def test_concurrent_acquires_cannot_exceed_the_limit(limiter: SimulationLimiter):
     user = uuid4()
 
-    with pytest.raises(ConnectionError):
-        await limiter.submit(FakeTask(fail=True), user, config=CONFIG)
-
-    assert await limiter.active(user) == set()
-
-
-async def test_concurrent_submits_cannot_exceed_the_limit(limiter: UserTaskLimiter):
-    user, task = uuid4(), FakeTask()
-
     results = await asyncio.gather(
-        *(limiter.submit(task, user, config=CONFIG) for _ in range(limiter.limit * 4))
+        *(limiter.acquire(user) for _ in range(limiter.limit * 4))
     )
 
-    assert sum(r is not None for r in results) == limiter.limit
+    assert sum(task_id is not None for task_id in results) == limiter.limit
     assert len(await limiter.active(user)) == limiter.limit
 
 
-def test_app_is_configured_for_reliable_delivery(resources: Resources):
+async def test_service_rolls_back_reservation_when_publish_fails(
+    resources: Resources, monkeypatch: pytest.MonkeyPatch
+):
+    class BrokenTask:
+        def apply_async(self, **_kwargs):
+            raise ConnectionError("broker is down")
+
+    owner_id = uuid4()
+    monkeypatch.setattr("encosim_server.simulation.service.handle_simulation", BrokenTask())
+
+    with pytest.raises(ConnectionError):
+        await resources.simulations.submit(
+            SimulationConfig.model_validate(simulation_payload()), owner_id
+        )
+
+    assert await resources.celery.simulation_limiter.active(owner_id) == set()
+    assert await resources.simulations.records.find_one({"owner_id": owner_id}) is None
+
+
+def test_app_is_configured_for_reliable_delivery(resources: Resources, settings: Settings):
     conf = resources.celery.conf
     assert isinstance(conf.broker_url, str)
     assert conf.broker_url.startswith("redis+socket://")
+    assert conf.result_backend == "mongodb://"
+    assert conf.mongodb_backend_settings["database"] == settings.mongo_db
+    assert conf.result_expires is None  # history retention explicitly forgets old results
     assert conf.task_acks_late is True
     assert conf.task_reject_on_worker_lost is True
+    assert conf.task_track_started is True
     assert conf.worker_prefetch_multiplier == 1
     assert conf.accept_content == ["json"]
 
@@ -159,11 +155,14 @@ def test_simulation_task_has_both_time_limits(resources: Resources, settings: Se
 async def submit(
     resources: Resources, task: Any, user: UUID | None = None, **kwargs: Any
 ) -> AsyncResult:
-    result = await resources.celery.user_limiter.submit(
-        task, user or uuid4(), config=kwargs.get("config", CONFIG)
-    )
-    assert result is not None
-    return result
+    limiter = resources.celery.simulation_limiter
+    task_id = await limiter.acquire(user or uuid4())
+    assert task_id is not None
+    try:
+        return task.apply_async(kwargs={"config": kwargs.get("config", CONFIG)}, task_id=task_id)
+    except Exception:
+        limiter.release_sync(task_id)
+        raise
 
 
 async def finished(result: AsyncResult, timeout: float = 20) -> AsyncResult:
@@ -172,7 +171,7 @@ async def finished(result: AsyncResult, timeout: float = 20) -> AsyncResult:
 
 
 async def slot_freed(resources: Resources, task_id: str):
-    limiter = resources.celery.user_limiter
+    limiter = resources.celery.simulation_limiter
     await eventually(lambda: not limiter.task_exists(task_id), what="slot released")
 
 
@@ -200,7 +199,7 @@ async def test_failed_task_is_reported_and_frees_the_slot(resources: Resources):
 async def test_slot_is_held_while_the_task_runs(resources: Resources, redis_client: redis.Redis):
     user = uuid4()
     result = await submit(resources, tasks.gated_task, user)
-    limiter = resources.celery.user_limiter
+    limiter = resources.celery.simulation_limiter
 
     assert await limiter.active(user) == {result.id}
     assert not result.ready()

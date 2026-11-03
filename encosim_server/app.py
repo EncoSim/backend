@@ -32,7 +32,12 @@ def create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         async with connect_mongo(settings) as mongo:
-            yield AppState(resources=build_resources(settings, google, mongo))
+            resources = build_resources(settings, google, mongo)
+            try:
+                yield AppState(resources=resources)
+            finally:
+                await resources.celery.simulation_limiter.close()
+                resources.celery.close_backend()
 
     # using uvicorn's root_path causes double prefixes, which breaks docs
     with warnings.catch_warnings():

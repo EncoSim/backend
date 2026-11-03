@@ -9,6 +9,7 @@ from encosim_server.auth.sessions import SessionService
 from encosim_server.celery import PatchedCelery, create_celery
 from encosim_server.characters.service import CharacterService
 from encosim_server.core.settings import Settings
+from encosim_server.simulation.service import SimulationService
 from encosim_server.users.service import UserService
 
 
@@ -22,6 +23,7 @@ class Resources:
     auth: AuthService
     characters: CharacterService
     celery: PatchedCelery
+    simulations: SimulationService
 
 
 def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabase[Any]):
@@ -30,4 +32,5 @@ def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabas
     auth = AuthService(settings, google, sessions, users)
     characters = CharacterService(settings, db)
     celery = create_celery(settings)
-    return Resources(settings, google, db, sessions, users, auth, characters, celery)
+    simulations = SimulationService(settings, db, celery)
+    return Resources(settings, google, db, sessions, users, auth, characters, celery, simulations)

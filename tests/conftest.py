@@ -89,6 +89,7 @@ PINNED_SETTINGS = {
     "google_fake_provider": True,
     # simulation limits
     "max_simulations": 3,
+    "max_finished_simulations_per_user": 10,
     "max_simulation_participants": 4,
     "max_simulation_repetitions": 5,
     # celery: generous, the real simulator runs under these. The tasks in tests/celery_tasks.py

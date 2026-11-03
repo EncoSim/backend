@@ -1,129 +1,62 @@
 import sys
-from typing import Any, cast
-from uuid import UUID, uuid4
 
-import redis
-import redis.asyncio as aioredis
 from celery import Celery, Task
-from celery.result import AsyncResult
 
 from encosim_server.core.settings import Settings
-from encosim_server.database import get_redis_kwargs, make_redis_uri
-
-# TODO: make task limiter a service and wrap celery with it
+from encosim_server.database import make_mongo_backend_settings, make_redis_uri
+from encosim_server.simulation.limiter import SimulationLimiter
 
 
 class PatchedCelery(Celery):
-    user_limiter: "UserTaskLimiter"
-    """Use this as general interface when delegating work to celery"""
+    simulation_limiter: SimulationLimiter
+
+    def close_backend(self) -> None:
+        """Close the synchronous Mongo client if this process opened one."""
+        connection = getattr(self.backend, "_connection", None)
+        if connection is not None:
+            connection.close()
 
 
 def create_celery(settings: Settings) -> PatchedCelery:
-    uri = make_redis_uri(settings)
     app = PatchedCelery(
         "encosim",
-        broker=uri,
-        backend=uri,
+        broker=make_redis_uri(settings),
+        backend="mongodb://",
         include=["encosim_server.simulation.tasks"],
     )
     app.conf.update(
+        mongodb_backend_settings=make_mongo_backend_settings(settings),
         task_serializer="json",
+        result_serializer="json",
         accept_content=["json"],
         worker_prefetch_multiplier=1,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
+        task_track_started=True,
         task_soft_time_limit=int(settings.celery_soft_timeout.total_seconds()),
-        task_time_limit=int(settings.celery_hard_timeout.total_seconds()),  # the hard limit
-        result_extended=True,
+        task_time_limit=int(settings.celery_hard_timeout.total_seconds()),
+        # History retention/deletion explicitly forgets old Celery result records.
+        result_expires=None,
     )
-
-    app.user_limiter = UserTaskLimiter(settings)
+    app.simulation_limiter = SimulationLimiter(settings)
     return app
 
 
-# Atomic "check size, then add". KEYS[1]=set key, ARGV[1]=limit, ARGV[2]=task id
-_ACQUIRE = """
-if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
-redis.call('SADD', KEYS[1], ARGV[2])
-return 1
-"""
-
-
-class UserTaskLimiter:
-    """Manage limitation of user resources in celery"""
-
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        kwargs = get_redis_kwargs(settings)
-        self._async = aioredis.Redis(**kwargs)
-        self._sync = redis.Redis(**kwargs)
-        self._acquire = self._async.register_script(_ACQUIRE)
-
-    @property
-    def limit(self) -> int:
-        return self.settings.max_simulations
-
-    @staticmethod
-    def _key(user_id: UUID) -> str:
-        return f"limits:user:{user_id.hex}:tasks"
-
-    @staticmethod
-    def new_task_id(user_id: UUID) -> str:
-        return f"{user_id.hex}+{uuid4().hex}"
-
-    @staticmethod
-    def task_belongs_to(task_id: str, user_id: UUID) -> bool:
-        return task_id.startswith(f"{user_id.hex}+")
-
-    @staticmethod
-    def user_id_from_task_id(task_id: str) -> UUID | None:
-        uid, sep, _ = task_id.partition("+")
-        if sep == "":
-            return
-        return UUID(hex=uid)
-
-    def task_exists(self, task_id: str) -> bool:
-        user_id = self.user_id_from_task_id(task_id)
-        if user_id is None:
-            return False
-        return bool(self._sync.sismember(self._key(user_id), task_id))
-
-    async def submit(self, task: Any, user_id: UUID, **kwargs: Any) -> AsyncResult | None:
-        """Enqueue a task. Returns the AsyncResult, or None if at the limit."""
-        task = cast(Task, task)  # real task is a proxy for Task
-        task_id = self.new_task_id(user_id)
-        key = self._key(user_id)
-        if not await self._acquire(keys=[key], args=[self.limit, task_id]):
-            return None
-        try:
-            return task.apply_async(kwargs=kwargs, task_id=task_id)
-        except Exception:
-            await self._async.srem(key, task_id)  # message never reached the broker
-            raise
-
-    def release_sync(self, task_id: str):
-        user_id = UserTaskLimiter.user_id_from_task_id(task_id)
-        if user_id is None:
-            return
-        self._sync.srem(self._key(user_id), task_id)
-
-    # --- for debugging / cleanup ---
-    async def active(self, user_id: UUID):
-        # configured with `decode_responses=True`
-        return cast(set[str], await self._async.smembers(self._key(user_id)))
-
-
 class LimitedTask(Task):
-    """Base class for limited tasks. Releases via the limiter attached to the app."""
+    """Base task that idempotently releases a reserved per-user simulation slot."""
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        self.app.simulation_limiter.release_sync(task_id)
+        return super().on_failure(exc, task_id, args, kwargs, einfo)
 
     def after_return(self, status, retval, task_id, args, kwargs, einfo):
-        if status == "RETRY":  # still occupying its slot
-            return
-        self.app.user_limiter.release_sync(task_id)
+        if status != "RETRY":
+            self.app.simulation_limiter.release_sync(task_id)
+        return super().after_return(status, retval, task_id, args, kwargs, einfo)
 
 
 def main():
-    """Kept so that `python -m encosim_server.celery` (and `uv run celery`) still work."""
+    """Keep `python -m encosim_server.celery` and the CLI worker entry point working."""
     from encosim_server.cli import main as cli_main
 
     raise SystemExit(cli_main(["worker", *sys.argv[1:]]))

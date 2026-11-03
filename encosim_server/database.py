@@ -18,10 +18,13 @@ CHARACTERS = "characters"
 USERS = "users"
 SESSIONS = "session"
 TOMBSTONES = "tombstones"
+SIMULATIONS = "simulations"
+
 
 def make_redis_uri(settings: Settings) -> str:
     # celery needs special format
     return f"redis+socket://{settings.redis_conn}"
+
 
 class RedisArgs(TypedDict):
     unix_socket_path: str
@@ -33,6 +36,7 @@ def get_redis_kwargs(settings: Settings) -> RedisArgs:
         unix_socket_path=str(settings.redis_conn),
         decode_responses=True,
     )
+
 
 async def health_check_redis(settings: Settings, timeout: float = 5):
     redis = Redis(
@@ -47,6 +51,24 @@ async def health_check_redis(settings: Settings, timeout: float = 5):
         raise RuntimeError(f"Could not connect to Redis:\n{e}") from e
     finally:
         await redis.aclose()
+
+
+def make_mongo_backend_settings(settings: Settings) -> dict[str, Any]:
+    """Celery's Mongo backend needs an explicit host because its URI parser does not
+    preserve the unix-socket URI used by the async application client.
+    """
+    return {
+        "host": f"mongodb://{quote_plus(str(settings.mongo_conn))}",
+        "database": settings.mongo_db,
+        "user": settings.mongo_user,
+        "password": settings.mongo_pass.get_secret_value(),
+        "options": {
+            "replicaSet": settings.mongo_rs,
+            "authSource": "admin",
+            "uuidRepresentation": "standard",
+            "tz_aware": True,
+        },
+    }
 
 
 def make_mongo_uri(settings: Settings) -> str:
@@ -64,6 +86,7 @@ async def create_indexes(db: AsyncDatabase[Any]) -> None:
     await db[CHARACTERS].create_index("owner_id")
     await db[USERS].create_index("login_id", unique=True)
     await db[SESSIONS].create_index("user_id")
+    await db[SIMULATIONS].create_index([("owner_id", 1), ("status", 1), ("finished_at", -1)])
     # auto delete expired sessions
     await db[SESSIONS].create_index("expires_at", expireAfterSeconds=0)
 

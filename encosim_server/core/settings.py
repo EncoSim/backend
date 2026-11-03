@@ -55,6 +55,7 @@ class SettingsModel(BaseModel):
     max_simulation_participants: PositiveInt = 15
     max_simulation_repetitions: PositiveInt = 50
     max_simulations: PositiveInt = 10
+    max_finished_simulations_per_user: PositiveInt = 10
     max_characters: PositiveInt = 30
 
     # database
