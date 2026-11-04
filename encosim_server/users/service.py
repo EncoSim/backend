@@ -1,5 +1,5 @@
 import hashlib
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
@@ -21,7 +21,7 @@ def identity_hash(sub: str) -> str:
 
 
 class UserService:
-    def __init__(self, settings: Settings, db: AsyncDatabase, sessions: SessionService):
+    def __init__(self, settings: Settings, db: AsyncDatabase[Any], sessions: SessionService):
         self.users = db[USERS]
         self.characters = db[CHARACTERS]
         self.tombstones = db[TOMBSTONES]
@@ -52,7 +52,8 @@ class UserService:
 
         Assumes `login_id` belongs to an authorized party!
         """
-        res = await self.tombstones.find_one({"_id": login_id})
+        login_hash = identity_hash(login_id)
+        res = await self.tombstones.find_one({"_id": login_hash})
         if res:
             raise errors.Banned()
 
@@ -65,14 +66,14 @@ class UserService:
         now = utcnow()
         new_id = uuid4()
         raw = await self.users.find_one_and_update(
-            {"login_id": login_id},
+            {"login_hash": login_hash},
             {
                 "$set": {
                     "profile": profile.model_dump(),
                     "last_login": now,
                 },
                 "$setOnInsert": {
-                    "login_id": login_id,
+                    "login_hash": login_hash,
                     "_id": new_id,
                     "admin": is_admin,
                     "created_at": now,
@@ -130,7 +131,7 @@ class UserService:
             return False
         if user.ban_status.banned:
             await self.tombstones.update_one(
-                {"_id": user.login_id},
+                {"_id": user.login_hash},
                 {
                     "$set": {
                         "ban_status": user.ban_status.model_dump(),

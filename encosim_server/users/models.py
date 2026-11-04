@@ -9,7 +9,7 @@ from encosim_server.users.schemas import BanStatus, UserProfile
 class UserInDB(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    login_id: str
+    login_hash: str
     last_login: AwareDatetime
     created_at: AwareDatetime
     ban_status: BanStatus

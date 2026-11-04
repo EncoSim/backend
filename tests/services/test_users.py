@@ -12,7 +12,7 @@ from encosim_server.core import errors
 from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus
-from encosim_server.users.service import UserService
+from encosim_server.users.service import UserService, identity_hash
 from tests.conftest import Clock
 from tests.helpers import CHROME_WIN, fake_token, ids_from_sessions
 
@@ -55,7 +55,7 @@ async def bob(login_user: LoginUser) -> UserInDB:
 
 async def test_first_login_creates_a_user_and_fixture_works(clock: Clock, alice: UserInDB):
     assert isinstance(alice.user_id, UUID)
-    assert alice.login_id == "google:alice"
+    assert alice.login_hash == identity_hash("google:alice")
     assert alice.admin is False
     assert alice.ban_status.banned is False
     assert alice.profile.name == "alice"
@@ -120,7 +120,10 @@ async def test_banned_user_cannot_log_in(login_user: LoginUser, users: UserServi
 
 async def test_tombstoned_identity_cannot_log_in(login_user: LoginUser, db: AsyncDatabase[Any]):
     await db[TOMBSTONES].insert_one(
-        {"_id": "google:alice", "ban_status": BanStatus(banned=True, number=1).model_dump()}
+        {
+            "_id": identity_hash("google:alice"),
+            "ban_status": BanStatus(banned=True, number=1).model_dump(),
+        }
     )
 
     with pytest.raises(errors.Banned):
@@ -251,7 +254,7 @@ async def test_deleting_a_banned_user_blocks_the_identity(
 
     assert await users.delete(user.user_id) is True
 
-    tombstone = await db[TOMBSTONES].find_one({"_id": "google:alice"})
+    tombstone = await db[TOMBSTONES].find_one({"_id": user.login_hash})
     assert tombstone is not None
     assert tombstone["created_at"] == clock()
     ban = BanStatus.model_validate(tombstone["ban_status"])

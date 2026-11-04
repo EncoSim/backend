@@ -10,7 +10,7 @@ from encosim_server.core.security import decode_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
 from encosim_server.resources import Resources
-from encosim_server.users.service import UserService
+from encosim_server.users.service import UserService, identity_hash
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token, ids_from_sessions
 
 # --- helpers -----------------------------------------------------------------------------------
@@ -27,7 +27,7 @@ async def login(
 async def test_login_creates_user_session_and_matching_tokens(resources: Resources):
     result = await login(resources.auth, sub="alice")
 
-    assert result.user.login_id == "google:alice"
+    assert result.user.login_hash == identity_hash("google:alice")
     assert await resources.users.get(result.user.user_id) is not None
 
     claims = decode_access_token(resources.settings, result.access_token)
@@ -78,7 +78,7 @@ async def test_only_first_login_creates_user(auth: AuthService, users: UserServi
 
     found, corrupt = await users.list()
     assert len(found) == 1
-    assert found[0].login_id == "google:alice"
+    assert found[0].login_hash == identity_hash("google:alice")
     assert corrupt == []
 
 

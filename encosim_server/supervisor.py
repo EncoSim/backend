@@ -1,11 +1,12 @@
 """Starts, watches and stops the processes of a development stack (redis, celery, backend).
 
-Used by `encosim dev` and by the test suite. Production runs under supervisord (see `bootstrap`).
+Used by `encosim dev` and by the test suite. Production runs under supervisord (see `bootstrap.py`).
 
 * Every process is described once, as a `ServiceSpec`: its command, how to tell that it is ready,
   what it depends on and which files it reloads on. `stack_specs` builds the specs from `Settings`.
 * The settings reach the children as a private JSON file generated from the supervisor's own
-  `Settings` object, so a child always sees exactly what the supervisor sees (tests can override anything).
+  `Settings` object, so a child always sees exactly what the supervisor sees (tests can inject
+  settings like this).
 * Use it as a context manager to start and stop services by hand (tests), or call `run_forever`
   for the development loop: restart on crash, restart on file changes, stop on Ctrl+C.
 """
@@ -52,10 +53,10 @@ class ServiceFailed(SupervisorError):
 
 @dataclass(frozen=True)
 class ServiceSpec:
-    name: str
-    argv: Sequence[str]
-    ready: Callable[[], bool]  # may raise while the service is still booting
-    depends_on: tuple[str, ...] = ()
+    name: str  # handle
+    argv: Sequence[str]  # command + arguments
+    ready: Callable[[], bool]  # test is process is ready
+    depends_on: tuple[str, ...] = ()  # names of required processes
     watch: tuple[Path, ...] = ()  # restart the service (and its dependents) when files change
     tee_to: Path | None = None  # copy the output here (for programs that cannot log to a file)
     cwd: Path | None = None
@@ -188,6 +189,10 @@ class Service:
 
 
 class Supervisor:
+    """Supervise a stack of services (order of dependency: `[parent, child, grandchild, ...]`).
+
+    Services inherit settings via temporary config files
+    """
     def __init__(self, settings: Settings, specs: Sequence[ServiceSpec], echo: bool = True):
         names = [spec.name for spec in specs]
         if len(set(names)) != len(names):
@@ -434,14 +439,13 @@ class CeleryProbe:
         return bool(self._app.control.ping(timeout=1.0, limit=1))
 
 
-def tcp_probe(host: str, port: int) -> Callable[[], bool]:
+def probe_socket_factory(host: str, port: int) -> Callable[[], bool]:
     def probe() -> bool:
         try:
             with socket.create_connection((host, port), timeout=0.5):
                 return True
         except OSError:
             return False
-
     return probe
 
 
@@ -514,7 +518,7 @@ def stack_specs(
             ServiceSpec(
                 "backend",
                 argv=[*python, "serve", *(["--reload"] if reload else [])],
-                ready=tcp_probe(host, settings.port),
+                ready=probe_socket_factory(host, settings.port),
                 depends_on=needs_redis,
                 cwd=cwd,
                 ready_timeout=60,

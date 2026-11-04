@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, Request, Response
 from pydantic import UUID4
 
@@ -30,7 +29,7 @@ async def login_google(res: ResourcesDep, token: GoogleLoginInSchema, request: R
     )
     response = Response(
         out.model_dump_json(),
-        media_type="content/json",
+        media_type="application/json",
         status_code=201 if login_result.is_new else 200,
     )
     set_refresh_cookie(request, response, res.settings, login_result.refresh_token)
@@ -53,7 +52,7 @@ async def refresh(res: ResourcesDep, request: Request):
         profile=login_result.user.profile,
         access_token=login_result.access_token,
     )
-    response = Response(out.model_dump_json(), media_type="content/json")
+    response = Response(out.model_dump_json(), media_type="application/json")
     clear_refresh_cookie(request, response, res.settings)
     set_refresh_cookie(request, response, res.settings, login_result.refresh_token)
     return response

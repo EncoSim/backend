@@ -14,6 +14,7 @@ from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus, UserProfile
+from encosim_server.users.service import identity_hash
 from tests.conftest import Clock
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, ids_from_sessions, tamper_refresh_token
 
@@ -27,7 +28,7 @@ def make_user(clock: Clock):
     def new(name: str = "alice", banned: bool = False) -> UserInDB:
         """create a unique fake user"""
         return UserInDB(
-            login_id=f"google:{uuid4()}",
+            login_hash=identity_hash(f"google:{uuid4()}"),
             _id=uuid4(),
             last_login=clock(),
             created_at=clock(),

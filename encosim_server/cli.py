@@ -1,6 +1,5 @@
 """The command line: `encosim serve | worker | dev`.
 
-The older script names (`main`, `celery`, `dev`) are aliases for the three commands.
 Settings are loaded from an explicitly selected JSON file (`--config`).
 """
 

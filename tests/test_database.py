@@ -10,12 +10,13 @@ from encosim_server.database import (
     USERS,
     create_indexes,
 )
+from encosim_server.users.service import identity_hash
 
 
-async def test_login_id_is_unique(db: AsyncDatabase[Any]):
-    await db[USERS].insert_one({"_id": uuid4(), "login_id": "google:x"})
+async def test_login_hash_is_unique(db: AsyncDatabase[Any]):
+    await db[USERS].insert_one({"_id": uuid4(), "login_hash": identity_hash("google:x")})
     with pytest.raises(DuplicateKeyError):
-        await db[USERS].insert_one({"_id": uuid4(), "login_id": "google:x"})
+        await db[USERS].insert_one({"_id": uuid4(), "login_hash": identity_hash("google:x")})
         print(await db[USERS].index_information())
 
 

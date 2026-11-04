@@ -81,10 +81,8 @@ def make_mongo_uri(settings: Settings) -> str:
 
 
 async def create_indexes(db: AsyncDatabase[Any]) -> None:
-    # TODO: easier way to keep in sync?
-    # should very rarely change outside of early development
     await db[CHARACTERS].create_index("owner_id")
-    await db[USERS].create_index("login_id", unique=True)
+    await db[USERS].create_index("login_hash", unique=True)
     await db[SESSIONS].create_index("user_id")
     await db[SIMULATIONS].create_index([("owner_id", 1), ("status", 1), ("finished_at", -1)])
     # auto delete expired sessions

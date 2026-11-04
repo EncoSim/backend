@@ -18,14 +18,16 @@ class Settings(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # uvicorn
+    # uvicorn, fastapi
     port: PositiveInt = Field(8000, lt=2**16)
     bind: str = "0.0.0.0"
-    workers: PositiveInt = 4  # ignored outside of production
+    workers: PositiveInt = 4
+    debug: bool = False
+    root_path: str = "/api"
 
     # logging
     log_level: str = "INFO"
-    logs_dir: Path | None = None  # TODO: setup logging properly!
+    logs_dir: Path | None = None
 
     # login providers
     google_client_id: str

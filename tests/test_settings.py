@@ -1,6 +1,5 @@
 """Settings loading and JSON round trips (no MongoDB or Redis needed)."""
 
-import json
 import logging
 import os
 import stat

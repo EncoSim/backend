@@ -70,7 +70,7 @@ def main():
     )
     parser.add_argument(
         "--google",
-        required=True,
+        default="CHANGE_ME",
         dest="google_client_id",
         help="Google Client Id. Can also use a dummy value for local environments.",
     )
@@ -98,22 +98,24 @@ def main():
         name="production",
         bind="0.0.0.0",
         port=8000,
-        google_client_id=args.google_client_id,
         log_level="INFO",
+        google_client_id=args.google_client_id,
     )
     writer.add_setup(
         name="staging",
         bind="0.0.0.0",
         port=8001,
-        google_client_id=args.google_client_id,
+        debug=True,
         log_level="DEBUG",
+        google_client_id=args.google_client_id,
     )
     writer.add_setup(
         name="local",
         bind="localhost",
         port=8000,
+        debug=True,
         log_level="DEBUG",
-        google_client_id=args.google_client_id,
+        google_client_id="FAKE",
         google_fake_provider=True,
         admin_mails=["admin@example.com"],
         cookie_samesite="lax",
@@ -123,7 +125,9 @@ def main():
         name="test",
         bind="localhost",
         port=8001,
-        google_client_id=args.google_client_id,
+        debug=True,
+        google_client_id="FAKE",
+        google_fake_provider=True,
         log_level="DEBUG",
         cookie_secure=False,
     )
@@ -363,14 +367,14 @@ class MongoBootstrapper:
                 )
                 has_admin = len(result.get("users", [])) > 0
                 if has_admin:
-                    print("Admin already exists")
+                    print("Admin(s) already exists")
                 else:
                     admin = self.ask_admin_credentials()
                     self.create_user(client, admin.username, admin.password, ["root"])
 
                 # add regular users
                 for user in users:
-                    self.create_user(
+                    self.create_or_update_user(
                         client,
                         user.username,
                         user.password,
@@ -427,17 +431,25 @@ class MongoBootstrapper:
         return MongoAdmin(admin, password)
 
     @staticmethod
-    def create_user(
+    def create_user(client: MongoClient[Any], name: str, password: SecretStr, roles: list[Any]):
+        client.admin.command("createUser", name, pwd=password.get_secret_value(), roles=roles)
+
+    @staticmethod
+    def create_or_update_user(
         client: MongoClient[Any],
         name: str,
         password: SecretStr,
         roles: list[Any],
     ) -> None:
         try:
-            client.admin.command("createUser", name, pwd=password.get_secret_value(), roles=roles)
+            client.admin.command(
+                {"updateUser": name, "pwd": password.get_secret_value(), "roles": roles}
+            )
         except OperationFailure as e:
-            if e.code != 51003:  # user already exists
-                raise
+            if e.code == 11:  # user not found
+                MongoBootstrapper.create_user(client, name, password, roles)
+                return
+            raise
 
 
 # --- sockets --------------------------------------------------------------------------------------
