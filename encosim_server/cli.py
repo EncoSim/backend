@@ -60,6 +60,21 @@ def dev(settings: Settings) -> int:
         return supervisor.run_forever()
 
 
+def openapi(settings: Settings) -> int:
+    """Export openapi description"""
+    import json
+
+    from encosim_server.app import create_app
+
+    settings.warn_on_insecure_settings()
+    app = create_app(settings)
+    schema = app.openapi()
+    json.dump(schema, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", type=Path, required=True, help="JSON configuration file")
@@ -79,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     commands.add_parser("dev", parents=[common], help="redis, celery and backend with reload")
+    commands.add_parser("openapi", parents=[common], help="export openapi description")
     return parser
 
 
@@ -101,10 +117,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             worker(settings, include=args.include, celery_args=celery_args)
         case "dev":
             return dev(settings)
+        case "openapi":
+            return openapi(settings)
     return 0
 
 
-# script aliases: `uv run main`, `uv run celery`, `uv run dev`
+# script aliases
+
+
 def serve_main() -> int:
     return main(["serve", *sys.argv[1:]])
 
@@ -115,3 +135,7 @@ def worker_main() -> int:
 
 def dev_main() -> int:
     return main(["dev", *sys.argv[1:]])
+
+
+def openapi_main() -> int:
+    return main(["openapi", *sys.argv[1:]])
