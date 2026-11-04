@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.auth.sessions import SessionService
+from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
@@ -20,8 +20,8 @@ def identity_hash(sub: str) -> str:
     return hashlib.sha256(sub.encode()).hexdigest()
 
 
-class UserService:
-    def __init__(self, settings: Settings, db: AsyncDatabase[Any], sessions: SessionService):
+class UserManager:
+    def __init__(self, settings: Settings, db: AsyncDatabase[Any], sessions: SessionsManager):
         self.users = db[USERS]
         self.characters = db[CHARACTERS]
         self.tombstones = db[TOMBSTONES]

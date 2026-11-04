@@ -28,7 +28,7 @@ def use_task(monkeypatch: MonkeyPatch):
     """Make POST /simu run a test task instead of the real simulator."""
 
     def use(task: Any):
-        monkeypatch.setattr("encosim_server.simulation.service.handle_simulation", task)
+        monkeypatch.setattr("encosim_server.simulation.manager.handle_simulation", task)
 
     return use
 

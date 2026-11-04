@@ -10,7 +10,7 @@ from encosim_server.database import (
     USERS,
     create_indexes,
 )
-from encosim_server.users.service import identity_hash
+from encosim_server.users.manager import identity_hash
 
 
 async def test_login_hash_is_unique(db: AsyncDatabase[Any]):

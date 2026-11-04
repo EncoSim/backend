@@ -110,7 +110,7 @@ async def test_service_rolls_back_reservation_when_publish_fails(
             raise ConnectionError("broker is down")
 
     owner_id = uuid4()
-    monkeypatch.setattr("encosim_server.simulation.service.handle_simulation", BrokenTask())
+    monkeypatch.setattr("encosim_server.simulation.manager.handle_simulation", BrokenTask())
 
     with pytest.raises(ConnectionError):
         await resources.simulations.submit(

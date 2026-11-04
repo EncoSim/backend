@@ -3,12 +3,12 @@ from typing import Annotated
 from uuid import UUID
 
 from encosim_server.auth.google import GoogleVerifier
-from encosim_server.auth.sessions import SessionService
+from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
 from encosim_server.core.security import create_access_token
 from encosim_server.core.settings import Settings
+from encosim_server.users.manager import UserManager
 from encosim_server.users.models import UserInDB
-from encosim_server.users.service import UserService
 
 
 @dataclass
@@ -19,13 +19,13 @@ class LoginResult:
     refresh_token: str
 
 
-class AuthService:
+class AuthManager:
     def __init__(
         self,
         settings: Settings,
         google: GoogleVerifier,
-        sessions: SessionService,
-        users: UserService,
+        sessions: SessionsManager,
+        users: UserManager,
     ):
         self.settings = settings
         self.google = google

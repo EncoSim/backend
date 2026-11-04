@@ -7,14 +7,14 @@ import pytest
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.schema import SessionSchema
-from encosim_server.auth.sessions import SessionService, get_session_info
+from encosim_server.auth.sessions import SessionsManager, get_session_info
 from encosim_server.core import errors
 from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus, UserProfile
-from encosim_server.users.service import identity_hash
+from encosim_server.users.manager import identity_hash
 from tests.conftest import Clock
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, ids_from_sessions, tamper_refresh_token
 
@@ -71,7 +71,7 @@ def test_session_info_is_a_readable_label_not_an_object_repr():
 
 
 async def test_create_returns_token_and_id_and_stores_only_a_hash(
-    sessions: SessionService, db: AsyncDatabase[Any], alice: UserInDB
+    sessions: SessionsManager, db: AsyncDatabase[Any], alice: UserInDB
 ):
     token, session_id = await sessions.create(alice, CHROME_WIN)
 
@@ -84,7 +84,7 @@ async def test_create_returns_token_and_id_and_stores_only_a_hash(
     assert "Chrome" in doc["info"]
 
 
-async def test_new_session_is_listed_immediately(alice: UserInDB, sessions: SessionService):
+async def test_new_session_is_listed_immediately(alice: UserInDB, sessions: SessionsManager):
     _, session_id = await sessions.create(alice, CHROME_WIN)
 
     listed = await sessions.list_user_sessions(alice.user_id)
@@ -101,7 +101,7 @@ async def test_new_session_is_listed_immediately(alice: UserInDB, sessions: Sess
 
 
 async def test_session_limit_evicts_the_least_recently_used(
-    alice: UserInDB, sessions: SessionService, clock: Clock
+    alice: UserInDB, sessions: SessionsManager, clock: Clock
 ):
     ids = []
     # limit is 3 (from pinned settings)
@@ -120,7 +120,7 @@ async def test_session_limit_evicts_the_least_recently_used(
 
 
 async def test_session_limit_is_per_user(
-    alice: UserInDB, bob: UserInDB, sessions: SessionService, clock: Clock
+    alice: UserInDB, bob: UserInDB, sessions: SessionsManager, clock: Clock
 ):
     for _ in range(3):
         await sessions.create(alice, CHROME_WIN)
@@ -144,7 +144,7 @@ async def test_token_parsing():
 
 async def test_rotate_issues_a_new_token_and_extends_ttl(
     alice: UserInDB,
-    sessions: SessionService,
+    sessions: SessionsManager,
     db: AsyncDatabase[Any],
     clock: Clock,
     settings: Settings,
@@ -162,7 +162,7 @@ async def test_rotate_issues_a_new_token_and_extends_ttl(
     assert doc["last_used_at"] == clock()
 
 
-async def test_rotated_token_can_be_rotated_again(alice: UserInDB, sessions: SessionService):
+async def test_rotated_token_can_be_rotated_again(alice: UserInDB, sessions: SessionsManager):
     token, _ = await sessions.create(alice, CHROME_WIN)
     second, _, _ = await sessions.rotate(token)
     third, _, _ = await sessions.rotate(second)
@@ -170,7 +170,7 @@ async def test_rotated_token_can_be_rotated_again(alice: UserInDB, sessions: Ses
 
 
 async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
-    alice: UserInDB, sessions: SessionService
+    alice: UserInDB, sessions: SessionsManager
 ):
     old, sid = await sessions.create(alice, CHROME_WIN)
     new, _, _ = await sessions.rotate(old)
@@ -184,7 +184,7 @@ async def test_replaying_an_old_token_is_rejected_and_kills_the_session(
 
 
 async def test_wrong_secret_is_rejected_and_kills_the_session(
-    alice: UserInDB, sessions: SessionService
+    alice: UserInDB, sessions: SessionsManager
 ):
     token, _ = await sessions.create(alice, CHROME_WIN)
 
@@ -195,12 +195,12 @@ async def test_wrong_secret_is_rejected_and_kills_the_session(
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "no-dot-here", "....", "not-a-uuid.secret"])
-async def test_malformed_token_is_rejected(sessions: SessionService, garbage: str):
+async def test_malformed_token_is_rejected(sessions: SessionsManager, garbage: str):
     with pytest.raises(errors.InvalidSession):
         await sessions.rotate(garbage)
 
 
-async def test_token_for_unknown_session_is_rejected(sessions: SessionService):
+async def test_token_for_unknown_session_is_rejected(sessions: SessionsManager):
     token, _ = new_refresh_token(uuid4())
     with pytest.raises(errors.InvalidSession):
         await sessions.rotate(token)
@@ -208,7 +208,7 @@ async def test_token_for_unknown_session_is_rejected(sessions: SessionService):
 
 @pytest.mark.usefixtures("disable_ttl_cleanup")
 async def test_expired_session_cannot_be_rotated(
-    alice: UserInDB, sessions: SessionService, db: AsyncDatabase[Any], clock: Clock
+    alice: UserInDB, sessions: SessionsManager, db: AsyncDatabase[Any], clock: Clock
 ):
     """Mongo's TTL monitor only runs about once a minute, so expired documents can linger.
 
@@ -230,7 +230,7 @@ async def test_expired_session_cannot_be_rotated(
 # --- terminate -----------------------------------------------------------------------
 
 
-async def test_terminate_removes_only_that_session(alice: UserInDB, sessions: SessionService):
+async def test_terminate_removes_only_that_session(alice: UserInDB, sessions: SessionsManager):
     _, a = await sessions.create(alice, CHROME_WIN)
     _, b = await sessions.create(alice, FIREFOX_LINUX)
 
@@ -239,12 +239,12 @@ async def test_terminate_removes_only_that_session(alice: UserInDB, sessions: Se
     assert ids_from_sessions(await sessions.list_user_sessions(alice.user_id)) == {b}
 
 
-async def test_terminate_unknown_session_is_a_noop(sessions: SessionService):
+async def test_terminate_unknown_session_is_a_noop(sessions: SessionsManager):
     await sessions.terminate(uuid4())
 
 
 async def test_terminate_by_token_requires_the_current_token(
-    alice: UserInDB, sessions: SessionService
+    alice: UserInDB, sessions: SessionsManager
 ):
     old, sid = await sessions.create(alice, CHROME_WIN)
     current, _, _ = await sessions.rotate(old)
@@ -260,12 +260,12 @@ async def test_terminate_by_token_requires_the_current_token(
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "not-a-uuid.secret"])
-async def test_terminate_by_token_is_silent_for_garbage(sessions: SessionService, garbage: str):
+async def test_terminate_by_token_is_silent_for_garbage(sessions: SessionsManager, garbage: str):
     await sessions.terminate_by_token(garbage)
 
 
 async def test_terminate_for_user_checks_ownership(
-    alice: UserInDB, bob: UserInDB, sessions: SessionService
+    alice: UserInDB, bob: UserInDB, sessions: SessionsManager
 ):
     _, alice_session = await sessions.create(alice, CHROME_WIN)
     _, bob_session = await sessions.create(bob, CHROME_WIN)
@@ -278,7 +278,7 @@ async def test_terminate_for_user_checks_ownership(
 
 
 async def test_terminate_all_for_user_leaves_other_users_alone(
-    alice: UserInDB, bob: UserInDB, sessions: SessionService
+    alice: UserInDB, bob: UserInDB, sessions: SessionsManager
 ):
     await sessions.create(alice, CHROME_WIN)
     await sessions.create(alice, FIREFOX_LINUX)
@@ -294,7 +294,7 @@ async def test_terminate_all_for_user_leaves_other_users_alone(
 
 
 async def test_list_is_sorted_by_last_use_and_skips_expired(
-    alice: UserInDB, sessions: SessionService, db: AsyncDatabase[Any], clock: Clock
+    alice: UserInDB, sessions: SessionsManager, db: AsyncDatabase[Any], clock: Clock
 ):
     t_a, a = await sessions.create(alice, CHROME_WIN)
     clock.tick(seconds=1)
@@ -313,5 +313,5 @@ async def test_list_is_sorted_by_last_use_and_skips_expired(
     assert all(s.expires_at > clock() for s in listed)
 
 
-async def test_list_for_user_without_sessions_is_empty(alice: UserInDB, sessions: SessionService):
+async def test_list_for_user_without_sessions_is_empty(alice: UserInDB, sessions: SessionsManager):
     assert await sessions.list_user_sessions(alice.user_id) == []

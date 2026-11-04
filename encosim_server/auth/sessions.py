@@ -14,7 +14,7 @@ from encosim_server.database import SESSIONS
 from encosim_server.users.models import UserInDB
 
 
-class SessionService:
+class SessionsManager:
     """Manage user login sessions
 
     Warning: sessions do not terminate immediately! Always validate the login session when

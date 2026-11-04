@@ -27,7 +27,7 @@ from encosim_server.simulation.tasks import handle_simulation
 logger = logging.getLogger(__name__)
 
 
-class SimulationService:
+class SimulationManager:
     """Application-facing orchestration for simulation jobs and their finished history.
 
     Celery remains the authority for live task state. MongoDB stores the submitted
@@ -38,7 +38,7 @@ class SimulationService:
         self.settings = settings
         self.celery = celery
         self.limiter = celery.simulation_limiter
-        self.records: AsyncCollection = db[SIMULATIONS]
+        self.records = db[SIMULATIONS]
 
     async def submit(self, config: SimulationConfig, owner_id: UUID) -> SimulationResult:
         # Reap completed jobs whose worker was killed before its task-finally hooks ran.

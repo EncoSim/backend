@@ -4,13 +4,13 @@ from typing import Any
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.google import GoogleVerifier
-from encosim_server.auth.service import AuthService
-from encosim_server.auth.sessions import SessionService
+from encosim_server.auth.manager import AuthManager
+from encosim_server.auth.sessions import SessionsManager
 from encosim_server.celery import PatchedCelery, create_celery
-from encosim_server.characters.service import CharacterService
+from encosim_server.characters.manager import CharacterManager
 from encosim_server.core.settings import Settings
-from encosim_server.simulation.service import SimulationService
-from encosim_server.users.service import UserService
+from encosim_server.simulation.manager import SimulationManager
+from encosim_server.users.manager import UserManager
 
 
 @dataclass
@@ -18,19 +18,19 @@ class Resources:
     settings: Settings
     google: GoogleVerifier
     db: AsyncDatabase[Any]
-    sessions: SessionService
-    users: UserService
-    auth: AuthService
-    characters: CharacterService
+    sessions: SessionsManager
+    users: UserManager
+    auth: AuthManager
+    characters: CharacterManager
     celery: PatchedCelery
-    simulations: SimulationService
+    simulations: SimulationManager
 
 
 def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabase[Any]):
-    sessions = SessionService(settings, db)
-    users = UserService(settings, db, sessions)
-    auth = AuthService(settings, google, sessions, users)
-    characters = CharacterService(settings, db)
+    sessions = SessionsManager(settings, db)
+    users = UserManager(settings, db, sessions)
+    auth = AuthManager(settings, google, sessions, users)
+    characters = CharacterManager(settings, db)
     celery = create_celery(settings)
-    simulations = SimulationService(settings, db, celery)
+    simulations = SimulationManager(settings, db, celery)
     return Resources(settings, google, db, sessions, users, auth, characters, celery, simulations)

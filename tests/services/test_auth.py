@@ -3,20 +3,20 @@ from typing import Any
 import pytest
 from pymongo.asynchronous.database import AsyncDatabase
 
-from encosim_server.auth.service import AuthService, LoginResult
-from encosim_server.auth.sessions import SessionService
+from encosim_server.auth.manager import AuthManager, LoginResult
+from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
 from encosim_server.core.security import decode_access_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS, USERS
 from encosim_server.resources import Resources
-from encosim_server.users.service import UserService, identity_hash
+from encosim_server.users.manager import UserManager, identity_hash
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token, ids_from_sessions
 
 # --- helpers -----------------------------------------------------------------------------------
 
 async def login(
-    auth: AuthService, sub: str = "alice", user_agent: str | None = CHROME_WIN
+    auth: AuthManager, sub: str = "alice", user_agent: str | None = CHROME_WIN
 ) -> LoginResult:
     """login with fake google id token"""
     return await auth.login_google(fake_token(sub), user_agent)
@@ -41,7 +41,7 @@ async def test_login_creates_user_session_and_matching_tokens(resources: Resourc
     assert (rotated_session_id, rotated_user_id) == (claims.sid, claims.sub)
 
 
-async def test_login_records_the_device(auth: AuthService, sessions: SessionService):
+async def test_login_records_the_device(auth: AuthManager, sessions: SessionsManager):
     result = await login(auth, user_agent=CHROME_WIN)
 
     listed = await sessions.list_user_sessions(result.user.user_id)
@@ -49,13 +49,13 @@ async def test_login_records_the_device(auth: AuthService, sessions: SessionServ
     assert "Chrome" in listed[0].info
 
 
-async def test_login_without_a_user_agent_header(auth: AuthService, sessions: SessionService):
+async def test_login_without_a_user_agent_header(auth: AuthManager, sessions: SessionsManager):
     result = await login(auth, user_agent=None)
 
     assert len(await sessions.list_user_sessions(result.user.user_id)) == 1
 
 
-async def test_each_login_is_a_separate_session(auth: AuthService, sessions: SessionService):
+async def test_each_login_is_a_separate_session(auth: AuthManager, sessions: SessionsManager):
     first = await login(auth, user_agent=CHROME_WIN)
     second = await login(auth, user_agent=FIREFOX_LINUX)
 
@@ -64,13 +64,13 @@ async def test_each_login_is_a_separate_session(auth: AuthService, sessions: Ses
     assert len(await sessions.list_user_sessions(first.user.user_id)) == 2
 
 
-async def test_different_google_accounts_are_different_users(auth: AuthService):
+async def test_different_google_accounts_are_different_users(auth: AuthManager):
     alice = await login(auth, "alice")
     bob = await login(auth, "bob")
 
     assert alice.user.user_id != bob.user.user_id
 
-async def test_only_first_login_creates_user(auth: AuthService, users: UserService):
+async def test_only_first_login_creates_user(auth: AuthManager, users: UserManager):
     alice = await login(auth, "alice")
     alice_again = await login(auth, "alice")
     assert alice.is_new
@@ -82,7 +82,7 @@ async def test_only_first_login_creates_user(auth: AuthService, users: UserServi
     assert corrupt == []
 
 
-async def test_invalid_google_token_creates_nothing(auth: AuthService, db: AsyncDatabase[Any]):
+async def test_invalid_google_token_creates_nothing(auth: AuthManager, db: AsyncDatabase[Any]):
     with pytest.raises(errors.InvalidGoogleToken):
         await auth.login_google("not-a-valid-token", CHROME_WIN)
     assert await db[USERS].count_documents({}) == 0
@@ -90,7 +90,7 @@ async def test_invalid_google_token_creates_nothing(auth: AuthService, db: Async
 
 
 async def test_banned_user_cannot_log_in(
-    auth: AuthService, users: UserService, sessions: SessionService
+    auth: AuthManager, users: UserManager, sessions: SessionsManager
 ):
     result = await login(auth)
     await users.ban(result.user.user_id, "spam")
@@ -105,7 +105,7 @@ async def test_banned_user_cannot_log_in(
 
 
 async def test_refresh_rotates_the_token_and_keeps_user_and_session(
-    auth: AuthService, settings: Settings
+    auth: AuthManager, settings: Settings
 ):
     first = await login(auth)
     claims = decode_access_token(settings, first.access_token)
@@ -118,7 +118,7 @@ async def test_refresh_rotates_the_token_and_keeps_user_and_session(
     assert (refreshed_claims.sub, refreshed_claims.sid) == (claims.sub, claims.sid)
 
 
-async def test_refreshed_token_can_be_refreshed_again(auth: AuthService):
+async def test_refreshed_token_can_be_refreshed_again(auth: AuthManager):
     first = await login(auth)
     second = await auth.refresh(first.refresh_token)
     third = await auth.refresh(second.refresh_token)
@@ -127,7 +127,7 @@ async def test_refreshed_token_can_be_refreshed_again(auth: AuthService):
 
 
 async def test_replaying_the_old_refresh_token_fails_and_ends_the_session(
-    auth: AuthService, sessions: SessionService
+    auth: AuthManager, sessions: SessionsManager
 ):
     first = await login(auth)
     second = await auth.refresh(first.refresh_token)
@@ -142,13 +142,13 @@ async def test_replaying_the_old_refresh_token_fails_and_ends_the_session(
 
 
 @pytest.mark.parametrize("garbage", ["", "garbage", "not-a-uuid.secret"])
-async def test_refresh_with_a_garbage_token_is_rejected(auth: AuthService, garbage: str):
+async def test_refresh_with_a_garbage_token_is_rejected(auth: AuthManager, garbage: str):
     with pytest.raises(errors.InvalidSession):
         await auth.refresh(garbage)
 
 
 async def test_refreshing_one_session_does_not_touch_the_others(
-    auth: AuthService, sessions: SessionService
+    auth: AuthManager, sessions: SessionsManager
 ):
     laptop = await login(auth, user_agent=CHROME_WIN)
     phone = await login(auth, user_agent=FIREFOX_LINUX)
@@ -160,7 +160,7 @@ async def test_refreshing_one_session_does_not_touch_the_others(
 
 
 async def test_banned_user_cannot_refresh_and_loses_all_sessions(
-    auth: AuthService, db: AsyncDatabase[Any], sessions: SessionService
+    auth: AuthManager, db: AsyncDatabase[Any], sessions: SessionsManager
 ):
     laptop = await login(auth, user_agent=CHROME_WIN)
     await login(auth, user_agent=FIREFOX_LINUX)
@@ -175,7 +175,7 @@ async def test_banned_user_cannot_refresh_and_loses_all_sessions(
 
 
 async def test_banning_through_the_user_service_stops_refresh(
-    auth: AuthService, users: UserService
+    auth: AuthManager, users: UserManager
 ):
     first = await login(auth)
     await users.ban(first.user.user_id, "spam")
@@ -187,7 +187,7 @@ async def test_banning_through_the_user_service_stops_refresh(
 
 
 async def test_refresh_for_a_vanished_user_is_rejected_and_cleans_up(
-    auth: AuthService, db: AsyncDatabase[Any], sessions: SessionService
+    auth: AuthManager, db: AsyncDatabase[Any], sessions: SessionsManager
 ):
     first = await login(auth)
     await db[USERS].delete_one({"_id": first.user.user_id})  # user gone, session left behind
@@ -198,7 +198,7 @@ async def test_refresh_for_a_vanished_user_is_rejected_and_cleans_up(
     assert await sessions.list_user_sessions(first.user.user_id) == []
 
 
-async def test_unbanned_user_can_log_in_again(auth: AuthService, users: UserService):
+async def test_unbanned_user_can_log_in_again(auth: AuthManager, users: UserManager):
     first = await login(auth)
     await users.ban(first.user.user_id, "spam")
     await users.unban(first.user.user_id)
@@ -211,7 +211,7 @@ async def test_unbanned_user_can_log_in_again(auth: AuthService, users: UserServ
 # --- logout ---------------------------------------------------------------------------------------
 
 
-async def test_logout_ends_the_session(auth: AuthService, sessions: SessionService):
+async def test_logout_ends_the_session(auth: AuthManager, sessions: SessionsManager):
     result = await login(auth)
 
     await auth.logout(result.refresh_token)
@@ -221,7 +221,7 @@ async def test_logout_ends_the_session(auth: AuthService, sessions: SessionServi
         await auth.refresh(result.refresh_token)
 
 
-async def test_logout_leaves_other_sessions_alone(auth: AuthService, sessions: SessionService):
+async def test_logout_leaves_other_sessions_alone(auth: AuthManager, sessions: SessionsManager):
     laptop = await login(auth, user_agent=CHROME_WIN)
     phone = await login(auth, user_agent=FIREFOX_LINUX)
 
@@ -231,7 +231,7 @@ async def test_logout_leaves_other_sessions_alone(auth: AuthService, sessions: S
     await auth.refresh(phone.refresh_token)
 
 
-async def test_logout_twice_is_fine(auth: AuthService):
+async def test_logout_twice_is_fine(auth: AuthManager):
     result = await login(auth)
 
     await auth.logout(result.refresh_token)
@@ -239,12 +239,12 @@ async def test_logout_twice_is_fine(auth: AuthService):
 
 
 @pytest.mark.parametrize("token", [None, "", "garbage", "not-a-uuid.secret"])
-async def test_logout_tolerates_missing_or_garbage_tokens(auth: AuthService, token: str):
+async def test_logout_tolerates_missing_or_garbage_tokens(auth: AuthManager, token: str):
     await auth.logout(token)
 
 
 async def test_logout_with_an_outdated_token_leaves_the_session_alone(
-    auth: AuthService, sessions: SessionService
+    auth: AuthManager, sessions: SessionsManager
 ):
     first = await login(auth)
     refreshed = await auth.refresh(first.refresh_token)

@@ -7,12 +7,12 @@ import pytest_asyncio
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.auth.google import FakeGoogleVerifier
-from encosim_server.auth.sessions import SessionService
+from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
 from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
+from encosim_server.users.manager import UserManager, identity_hash
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus
-from encosim_server.users.service import UserService, identity_hash
 from tests.conftest import Clock
 from tests.helpers import CHROME_WIN, fake_token, ids_from_sessions
 
@@ -20,7 +20,7 @@ LoginUser = Callable[..., Awaitable[UserInDB]]
 
 
 @pytest.fixture
-def login_user(users: UserService, clock: Clock):
+def login_user(users: UserManager, clock: Clock):
     # clock fixture is needed here, so monkeypatch applies before all logins
     _ = clock
     verify = FakeGoogleVerifier().verify
@@ -84,7 +84,7 @@ async def test_different_login_ids_are_different_users(alice: UserInDB, bob: Use
     assert alice.user_id != bob.user_id
 
 
-async def test_login_does_not_reset_admin(users: UserService, login_user: LoginUser):
+async def test_login_does_not_reset_admin(users: UserManager, login_user: LoginUser):
     user = await login_user(sub="alice")
     await users.set_admin(user.user_id, True)
 
@@ -110,7 +110,7 @@ async def test_auto_promotion_on_first_login(
     assert user.admin == expected
 
 
-async def test_banned_user_cannot_log_in(login_user: LoginUser, users: UserService):
+async def test_banned_user_cannot_log_in(login_user: LoginUser, users: UserManager):
     user = await login_user("alice")
     assert await users.ban(user.user_id, "spam")
 
@@ -135,7 +135,7 @@ async def test_tombstoned_identity_cannot_log_in(login_user: LoginUser, db: Asyn
 # --- get -----------------------------------------------------------------------------
 
 
-async def test_get(users: UserService, alice: UserInDB):
+async def test_get(users: UserManager, alice: UserInDB):
     res = await users.get(alice.user_id)
     assert res is not None
     assert res.user_id == alice.user_id
@@ -146,7 +146,7 @@ async def test_get(users: UserService, alice: UserInDB):
 
 
 async def test_ban_marks_user_and_ends_all_their_sessions(
-    users: UserService, sessions: SessionService, clock: Clock, alice: UserInDB, bob: UserInDB
+    users: UserManager, sessions: SessionsManager, clock: Clock, alice: UserInDB, bob: UserInDB
 ):
     await sessions.create(alice, CHROME_WIN)
     await sessions.create(alice, CHROME_WIN)
@@ -167,11 +167,11 @@ async def test_ban_marks_user_and_ends_all_their_sessions(
     assert unbanned.ban_status.banned is False
 
 
-async def test_ban_unknown_user(users: UserService):
+async def test_ban_unknown_user(users: UserManager):
     assert await users.ban(uuid4(), "x") is False
 
 
-async def test_unban_restores_the_user(users: UserService, login_user: LoginUser):
+async def test_unban_restores_the_user(users: UserManager, login_user: LoginUser):
     user = await login_user()
     await users.ban(user.user_id, "spam")
 
@@ -184,21 +184,21 @@ async def test_unban_restores_the_user(users: UserService, login_user: LoginUser
     await login_user()  # may log in again
 
 
-async def test_unban_unknown_user(users: UserService):
+async def test_unban_unknown_user(users: UserManager):
     assert await users.unban(uuid4()) is False
 
 
 # --- roles ------------------------------------------------------------------------------
 
 
-async def test_set_admin(users: UserService, alice: UserInDB):
+async def test_set_admin(users: UserManager, alice: UserInDB):
     assert await users.set_admin(alice.user_id, True) is True
     res = await users.get(alice.user_id)
     assert res is not None
     assert res.admin is True
 
 
-async def test_set_admin_unknown_user(users: UserService):
+async def test_set_admin_unknown_user(users: UserManager):
     assert await users.set_admin(uuid4(), True) is False
 
 
@@ -206,8 +206,8 @@ async def test_set_admin_unknown_user(users: UserService):
 
 
 async def test_delete_removes_user_sessions_and_characters_but_nobody_elses(
-    users: UserService,
-    sessions: SessionService,
+    users: UserManager,
+    sessions: SessionsManager,
     db: AsyncDatabase[Any],
     alice: UserInDB,
     bob: UserInDB,
@@ -230,12 +230,12 @@ async def test_delete_removes_user_sessions_and_characters_but_nobody_elses(
     assert await db[CHARACTERS].count_documents({"_id": bobs_character}) == 1
 
 
-async def test_delete_unknown_user(users: UserService):
+async def test_delete_unknown_user(users: UserManager):
     assert await users.delete(uuid4()) is False
 
 
 async def test_deleting_a_normal_user_leaves_no_tombstone_and_allows_signing_up_again(
-    users: UserService, db: AsyncDatabase[Any], login_user: LoginUser
+    users: UserManager, db: AsyncDatabase[Any], login_user: LoginUser
 ):
     first = await login_user()
 
@@ -247,7 +247,7 @@ async def test_deleting_a_normal_user_leaves_no_tombstone_and_allows_signing_up_
 
 
 async def test_deleting_a_banned_user_blocks_the_identity(
-    users: UserService, db: AsyncDatabase[Any], clock: Clock, login_user: LoginUser
+    users: UserManager, db: AsyncDatabase[Any], clock: Clock, login_user: LoginUser
 ):
     user = await login_user()
     await users.ban(user.user_id, "spam")

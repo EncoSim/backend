@@ -15,7 +15,7 @@ from encosim_server.database import CHARACTERS
 
 logger = logging.getLogger(__name__)
 
-class CharacterService:
+class CharacterManager:
     def __init__(self, settings: Settings, db: AsyncDatabase[Any]) -> None:
         self.settings = settings
         self.chars = db[CHARACTERS]
