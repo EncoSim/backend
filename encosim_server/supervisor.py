@@ -4,8 +4,8 @@ Used by `encosim dev` and by the test suite. Production runs under supervisord (
 
 * Every process is described once, as a `ServiceSpec`: its command, how to tell that it is ready,
   what it depends on and which files it reloads on. `stack_specs` builds the specs from `Settings`.
-* The settings reach the children as an env file generated from the supervisor's own `Settings`
-  object, so a child always sees exactly what the supervisor sees (tests can override anything).
+* The settings reach the children as a private JSON file generated from the supervisor's own
+  `Settings` object, so a child always sees exactly what the supervisor sees (tests can override anything).
 * Use it as a context manager to start and stop services by hand (tests), or call `run_forever`
   for the development loop: restart on crash, restart on file changes, stop on Ctrl+C.
 """
@@ -22,7 +22,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from queue import Empty, Queue
 from typing import IO
@@ -31,8 +31,8 @@ import redis
 from celery import Celery
 
 from encosim_server.celery import create_celery
-from encosim_server.core.envfile import EnvFileEncoder
-from encosim_server.core.settings import ENV_FILE_VAR, Settings
+from encosim_server.core.configfile import ConfigFileWriter
+from encosim_server.core.settings import CONFIG_FILE_VAR, Settings
 from encosim_server.database import get_redis_kwargs
 from encosim_server.logs import service_log_file, tagged_print
 
@@ -64,10 +64,10 @@ class ServiceSpec:
     stop_grace: float = 10.0
 
 
-def child_environment(env_file: Path) -> dict[str, str]:
-    """Environment of a child: nothing `ENCOSIM_*` from outside, only the generated settings."""
+def child_environment(config_file: Path) -> dict[str, str]:
+    """Keep external settings out; pass only the generated config-file path to the child."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("ENCOSIM_")}
-    env[ENV_FILE_VAR] = str(env_file)
+    env[CONFIG_FILE_VAR] = str(config_file)
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
@@ -200,7 +200,7 @@ class Supervisor:
         self.specs = {spec.name: spec for spec in specs}  # in start order
         self.echo = echo
         self._services: dict[str, Service] = {}
-        self._env_file: Path | None = None
+        self._config_file: Path | None = None
         self._requests: Queue[str] = Queue()  # services whose files changed
         self._lock = threading.RLock()
 
@@ -208,9 +208,9 @@ class Supervisor:
         return self._services[name]
 
     @property
-    def env_file(self) -> Path | None:
-        """The generated settings file the children read (while the supervisor is open)."""
-        return self._env_file
+    def config_file(self) -> Path | None:
+        """The generated JSON file the children read (while the supervisor is open)."""
+        return self._config_file
 
     def __enter__(self):
         self.open()
@@ -220,32 +220,46 @@ class Supervisor:
         self.close()
 
     def open(self):
-        """Generate the settings the children will read. Starts nothing."""
-        fd, path = tempfile.mkstemp(prefix="encosim-", suffix=".env")  # private (0600)
+        """Generate the resolved JSON configuration the children will read. Starts nothing."""
+        fd, path = tempfile.mkstemp(prefix="encosim-", suffix=".json")  # private (0600)
         os.close(fd)
-        self._env_file = Path(path)
-        EnvFileEncoder(self._env_file, self.settings).save_settings()
+        self._config_file = Path(path)
+        ConfigFileWriter(self._config_file, self.settings).save_settings()
 
     def close(self):
         self.stop_all()
-        if self._env_file:
-            self._env_file.unlink(missing_ok=True)
-            self._env_file = None
+        if self._config_file:
+            self._config_file.unlink(missing_ok=True)
+            self._config_file = None
 
     # --- starting and stopping ---------------------------------------------------------------
 
     def ensure(self, name: str) -> Service:
         """Start `name` (and what it depends on) unless it runs, and wait until it is ready."""
         with self._lock:
-            if self._env_file is None:
+            if self._config_file is None:
                 raise SupervisorError("use the supervisor as a context manager")
             spec = self.specs[name]
             for dependency in spec.depends_on:
                 self.ensure(dependency)
             service = self._services.get(name)
             if service is None:
+                argv = list(spec.argv)
+                if name in ("celery", "backend"):
+                    command = "worker" if name == "celery" else "serve"
+                    try:
+                        command_index = argv.index(command)
+                    except ValueError as exc:
+                        raise SupervisorError(
+                            f"{name} service command does not contain {command!r}"
+                        ) from exc
+                    argv[command_index + 1 : command_index + 1] = [
+                        "--config",
+                        str(self._config_file),
+                    ]
+                    spec = replace(spec, argv=argv)
                 service = self._services[name] = Service(
-                    spec, child_environment(self._env_file), echo=self.echo
+                    spec, child_environment(self._config_file), echo=self.echo
                 )
             if not service.alive():
                 try:

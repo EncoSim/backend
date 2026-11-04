@@ -2,20 +2,22 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
-from pydantic import EmailStr, Field, PositiveInt, SecretStr
-from pydantic.main import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, PositiveInt, SecretStr
 
 logger = logging.getLogger(__name__)
 
-ENV_FILE_VAR = "ENCOSIM_ENV_FILE"
-DEFAULT_ENV_FILE = ".env"
+# This environment variable carries only the path to a JSON file into freshly spawned processes.
+# It is required to pass the config file to processes spawned through uvicorn.
+CONFIG_FILE_VAR = "ENCOSIM_CONFIG_FILE"
 
 
-# split settings into model and settings to exclude environment variables during auto-generation
-class SettingsModel(BaseModel):
+class Settings(BaseModel):
+    """Validated application configuration loaded exclusively from an explicit JSON file."""
+
+    model_config = ConfigDict(frozen=True)
+
     # uvicorn
     port: PositiveInt = Field(8000, lt=2**16)
     bind: str = "0.0.0.0"
@@ -26,7 +28,6 @@ class SettingsModel(BaseModel):
     logs_dir: Path | None = None  # TODO: setup logging properly!
 
     # login providers
-    # login providers / google
     google_client_id: str
     google_fake_provider: bool = False
 
@@ -51,7 +52,7 @@ class SettingsModel(BaseModel):
     # authentication / session
     max_sessions_per_user: int = 10
 
-    # priviledges
+    # privileges
     max_simulation_participants: PositiveInt = 15
     max_simulation_repetitions: PositiveInt = 50
     max_simulations: PositiveInt = 10
@@ -65,24 +66,17 @@ class SettingsModel(BaseModel):
     mongo_user: str
     mongo_pass: SecretStr
 
-    # celery
+    # celery / redis
     redis_conn: Path
     celery_soft_timeout: timedelta = timedelta(minutes=4)
     celery_hard_timeout: timedelta = timedelta(minutes=5)
 
-class Settings(SettingsModel, BaseSettings):
-    model_config = SettingsConfigDict(frozen=True, env_prefix="ENCOSIM_", extra="ignore")
-
     @classmethod
-    def load(cls, env_file: Path | str | None = None, **overrides: Any) -> Self:
-        """The one way to get settings: explicit file, else `$ENCOSIM_ENV_FILE`, else `./.env`.
-
-        Precedence (highest first): `overrides`, `ENCOSIM_*` environment variables, the file.
-        """
-        fp = Path(env_file or os.environ.get(ENV_FILE_VAR, DEFAULT_ENV_FILE))
+    def load(cls, config_file: Path | str) -> Self:
+        fp = Path(config_file).expanduser().resolve()
         if not fp.is_file():
-            logger.warning(f"Environment file {fp} not found")
-        return cls(_env_file=fp, **overrides)  # type: ignore
+            raise FileNotFoundError(f"Configuration file {fp} does not exist")
+        return cls.model_validate_json(fp.read_text(encoding="utf-8"))
 
     def warn_on_insecure_settings(self):
         if self.cookie_samesite != "strict" or not self.cookie_secure:
@@ -96,3 +90,14 @@ class Settings(SettingsModel, BaseSettings):
         if self.google_fake_provider:
             logger.warning("INSECURE SETTINGS: Using fake google authentication!")
         return self
+
+
+def config_file_from_environment() -> Path:
+    """Read the config-file *path* passed to spawned processes, never setting values."""
+    value = os.environ.get(CONFIG_FILE_VAR)
+    if not value:
+        raise RuntimeError(
+            f"No configuration file selected. Pass --config or set {CONFIG_FILE_VAR} "
+            "to the path of a JSON configuration file."
+        )
+    return Path(value)

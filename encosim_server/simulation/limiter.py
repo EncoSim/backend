@@ -1,10 +1,11 @@
+from typing import cast
 from uuid import UUID, uuid4
 
 import redis
 import redis.asyncio as aioredis
+
 from encosim_server.core.settings import Settings
 from encosim_server.database import get_redis_kwargs
-
 
 _ACQUIRE = """
 if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[1]) then return 0 end
@@ -66,7 +67,8 @@ class SimulationLimiter:
             self._sync.srem(self.key(user_id), task_id)
 
     async def active(self, user_id: UUID) -> set[str]:
-        return await self._async.smembers(self.key(user_id))
+        res = await self._async.smembers(self.key(user_id))
+        return cast(set[str], res)  # cast is valid, because client decodes responses
 
     async def close(self) -> None:
         await self._async.aclose()

@@ -9,7 +9,7 @@ from encosim_server.auth.google import FakeGoogleVerifier, RealGoogleVerifier
 from encosim_server.auth.router import router as auth_router
 from encosim_server.characters.router import router as char_router
 from encosim_server.core import errors
-from encosim_server.core.settings import Settings
+from encosim_server.core.settings import Settings, config_file_from_environment
 from encosim_server.database import connect_mongo
 from encosim_server.resources import Resources, build_resources
 from encosim_server.simulation.router import router as simu_router
@@ -52,8 +52,8 @@ def create_app(settings: Settings) -> FastAPI:
 
 def factory() -> FastAPI:
     """Argument-less factory for uvicorn: reloader and workers import the app in fresh processes,
-    where the settings come from `$ENCOSIM_ENV_FILE` (see `Settings.load`)."""
-    return create_app(Settings.load())
+    where the selected JSON path is passed through the process environment."""
+    return create_app(Settings.load(config_file_from_environment()))
 
 
 def main():

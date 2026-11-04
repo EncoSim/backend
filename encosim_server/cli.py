@@ -1,7 +1,7 @@
 """The command line: `encosim serve | worker | dev`.
 
 The older script names (`main`, `celery`, `dev`) are aliases for the three commands.
-Settings come from `--env-file`, else `$ENCOSIM_ENV_FILE`, else `./.env` (see `Settings.load`).
+Settings are loaded from an explicitly selected JSON file (`--config`).
 """
 
 import argparse
@@ -15,7 +15,7 @@ import uvicorn
 from celery.signals import setup_logging
 
 from encosim_server.celery import create_celery
-from encosim_server.core.settings import ENV_FILE_VAR, Settings
+from encosim_server.core.settings import CONFIG_FILE_VAR, Settings
 from encosim_server.logs import build_log_config, configure_logging
 from encosim_server.startup import startup
 from encosim_server.supervisor import PACKAGE_DIR, Supervisor, stack_specs
@@ -63,7 +63,7 @@ def dev(settings: Settings) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--env-file", type=Path, help=f"settings file (default: ${ENV_FILE_VAR})")
+    common.add_argument("--config", type=Path, required=True, help="JSON configuration file")
 
     parser = argparse.ArgumentParser(prog="encosim", description="EncoSim backend")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -85,10 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.env_file:
-        # child processes (uvicorn's reloader and workers) load their settings from here too
-        os.environ[ENV_FILE_VAR] = str(args.env_file.resolve())
-    settings = Settings.load()
+    config_file = args.config
+    config_file = config_file.expanduser().resolve()
+    # Uvicorn reloaders/workers import the app factory in fresh processes. This variable carries
+    # only the selected file path; Settings never reads setting values from the environment.
+    os.environ[CONFIG_FILE_VAR] = str(config_file)
+    settings = Settings.load(config_file)
 
     match args.command:
         case "serve":

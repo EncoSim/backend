@@ -66,13 +66,13 @@ def test_dependencies_must_be_listed_first(settings: Settings):
         Supervisor(settings, [spec("b", depends_on=("a",)), spec("a")])
 
 
-def test_the_env_file_is_private_and_removed_afterwards(settings: Settings):
+def test_the_generated_config_file_is_private_and_removed_afterwards(settings: Settings):
     with Supervisor(settings, []) as supervisor:
-        env_file = supervisor.env_file
-        assert env_file and env_file.is_file()
-        assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+        config_file = supervisor.config_file
+        assert config_file and config_file.is_file()
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
 
-    assert not env_file.exists()
+    assert not config_file.exists()
 
 
 def test_services_cannot_start_before_the_supervisor_is_open(settings: Settings):
@@ -93,8 +93,8 @@ def test_children_get_exactly_the_supervisors_settings(
     code = textwrap.dedent(
         f"""
         import json, pathlib, time
-        from encosim_server.core.settings import Settings
-        s = Settings.load()
+        from encosim_server.core.settings import Settings, config_file_from_environment
+        s = Settings.load(config_file_from_environment())
         data = [str(s.redis_conn), str(s.logs_dir), s.celery_hard_timeout.total_seconds(), s.port]
         pathlib.Path({str(out)!r}).write_text(json.dumps(data))
         time.sleep(60)

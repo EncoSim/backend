@@ -2,6 +2,7 @@
 .env*
 database/
 logs/
+config/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -111,14 +112,14 @@ ipython_config.py
 #   commonly ignored for libraries.
 #   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
 #poetry.lock
-#poetry.toml
+#poetry.json
 
 # pdm
 #   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
+#   pdm recommends including project-wide configuration in pdm.json, but excluding .pdm-python.
 #   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
 #pdm.lock
-#pdm.toml
+#pdm.json
 .pdm-python
 .pdm-build/
 
@@ -205,4 +206,4 @@ marimo/_lsp/
 __marimo__/
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/secrets.json

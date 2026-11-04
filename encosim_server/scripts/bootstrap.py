@@ -6,7 +6,7 @@ Will configure a root admin and 4 databases+users for
 - development/demo testing on a host machine (staging)
 - release on a host machine (production)
 
-as well as environment and supervisord files for the different scenarios
+as well as JSON configuration and supervisord files for the different scenarios
 
 File Structure
     base
@@ -19,12 +19,15 @@ File Structure
      │   ├─ mongodb-<PORT>.sock
      │   └─ mongod.conf
      ├─ redis
-     │   ├─ production.conf
-     │   └─ ...
-     ├─ .env.production
-     ├─ .env.staging
-     ├─ .env.local
-     ├─ .env.test
+     │   ├─ redis-production.conf
+     │   ├─ redis-staging.conf
+     │   ├─ redis-local.conf
+     │   └─ redis-test.conf
+     ├─ config/
+     │   ├─ production.json
+     │   ├─ staging.json
+     │   ├─ local.json
+     │   └─ test.json
      ├─ encosim.ini
      └─ README.md
 """
@@ -50,8 +53,8 @@ from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 
 from encosim_server import PROJECT_ROOT
-from encosim_server.core.envfile import EnvFileEncoder, write_file
-from encosim_server.core.settings import SettingsModel
+from encosim_server.core.configfile import ConfigFileWriter, write_file
+from encosim_server.core.settings import Settings
 
 
 def main():
@@ -111,10 +114,10 @@ def main():
         port=8000,
         log_level="DEBUG",
         google_client_id=args.google_client_id,
-        fake_google_provider=True,
+        google_fake_provider=True,
         admin_mails=["admin@example.com"],
-        cookies_samesite="lax",
-        cookies_secure=False,
+        cookie_samesite="lax",
+        cookie_secure=False,
     )
     writer.add_setup(
         name="test",
@@ -122,7 +125,7 @@ def main():
         port=8001,
         google_client_id=args.google_client_id,
         log_level="DEBUG",
-        cookies_secure=False,
+        cookie_secure=False,
     )
     writer.bootstrap_and_write()
     return
@@ -139,7 +142,7 @@ class ConfigWriter:
             mongo_port,
             replica_set,
         )
-        self.settings: list[EnvFileEncoder] = []
+        self.settings: list[ConfigFileWriter] = []
 
     def add_setup(
         self,
@@ -151,7 +154,7 @@ class ConfigWriter:
         **kwargs: Any,
     ):
         """The first setup is treated as the production configuration!"""
-        model = SettingsModel(
+        model = Settings(
             bind=bind,
             port=port,
             google_client_id=google_client_id,
@@ -165,7 +168,9 @@ class ConfigWriter:
             redis_conn=self.redis_dir / f"redis-{name}.sock",
             **kwargs,  # annoyingly, this ruins linter support...
         )
-        self.settings.append(EnvFileEncoder(self.base_dir / f".env.{name}", model))
+        self.settings.append(
+            ConfigFileWriter(self.base_dir / "config" / f"{name}.json", model)
+        )
 
     def bootstrap_and_write(self):
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -202,21 +207,25 @@ class ConfigWriter:
 
     @property
     def redis_main_conf(self) -> Path:
-        return self.redis_dir / "redis.conf"
+        return self.redis_dir / "redis-production.conf"
 
     def save_redis_config(self):
-        s = f"""\
-        daemonize no
-        port 0
-        unixsocket {self.settings[0].settings.redis_conn}
-        unixsocketperm 700
-        dir {self.redis_dir}
-        """
-        write_file(self.redis_main_conf, textwrap.dedent(s))
+        for config in self.settings:
+            name = config.fp.stem
+            data_dir = self.redis_dir / name
+            data_dir.mkdir(parents=True, exist_ok=True)
+            s = f"""\
+            daemonize no
+            port 0
+            unixsocket {config.settings.redis_conn}
+            unixsocketperm 700
+            dir {data_dir}
+            """
+            write_file(self.redis_dir / f"redis-{name}.conf", textwrap.dedent(s))
 
     def save_supervisord_config(self):
         common = (
-            f"environment=ENCOSIM_ENV_FILE={self.settings[0].fp}\n"
+            f"environment=ENCOSIM_CONFIG_FILE={self.settings[0].fp}\n"
             f"autostart=no\n"
             f"autorestart=yes\n"
             f"startsecs=10\n"
@@ -233,11 +242,11 @@ class ConfigWriter:
             f"{common}\n"
             f"[program:encosim-celery]\n"
             f"directory={PROJECT_ROOT}\n"
-            f"command=uv run celery\n"
+            f"command=uv run celery --config {self.settings[0].fp}\n"
             f"{common}\n"
             f"[program:encosim-backend]\n"
             f"directory={PROJECT_ROOT}\n"
-            f"command={sys.executable} -m encosim_server.app\n"
+            f"command={sys.executable} -m encosim_server.app --config {self.settings[0].fp}\n"
             f"{common}\n",
         )
 
