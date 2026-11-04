@@ -11,6 +11,7 @@ from celery.exceptions import (
 from celery.signals import task_failure
 from celery.worker.request import Request
 from encosim.api_endpoint import run_full_stat_recap_from_configs
+from encosim.core.entity_config import EntityConfig
 
 from encosim_server.celery import LimitedTask
 from encosim_server.simulation.history import finalize_simulation
@@ -138,4 +139,6 @@ def persist_failed_simulation(
 
 @shared_task(base=SimulationTask, bind=True, pydantic=True)
 def handle_simulation(self, config: SimulationConfig) -> str:
-    return run_full_stat_recap_from_configs(repetitions=config.repetitions, teams=config.teams)
+    return run_full_stat_recap_from_configs(
+        repetitions=config.repetitions, teams=config.as_pure_list()
+    )

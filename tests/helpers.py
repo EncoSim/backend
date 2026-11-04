@@ -9,6 +9,7 @@ from uuid import UUID
 from encosim.core.entity_config import create_default
 
 from encosim_server.auth.schema import SessionSchema
+from encosim_server.simulation.schemas import SimulationConfig
 
 CHROME_WIN = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -56,7 +57,9 @@ def simulation_payload(
 ) -> dict[str, Any]:
     """Request body for POST /simu: one team per entry of `team_sizes`."""
     entity = create_default().model_dump(mode="json")
-    return {"repetitions": repetitions, "teams": [[entity] * n for n in team_sizes]}
+    return SimulationConfig(
+        repetitions=repetitions, participants=[entity], teams=[[0] * n for n in team_sizes]
+    ).model_dump(mode="json")
 
 
 def is_running(pid: int) -> bool:

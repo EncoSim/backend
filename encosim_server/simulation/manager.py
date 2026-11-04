@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 class SimulationManager:
     """Application-facing orchestration for simulation jobs and their finished history.
 
-    Celery remains the authority for live task state. MongoDB stores the submitted
-    configuration and the durable, user-facing outcome.
+    Celery manages live task state. MongoDB stores the submitted configuration and the durable,
+    user-facing outcome.
     """
 
     def __init__(self, settings: Settings, db: AsyncDatabase[Any], celery: PatchedCelery):

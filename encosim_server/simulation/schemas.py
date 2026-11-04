@@ -1,19 +1,34 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from encosim import EntityConfig
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt
+from pydantic.functional_validators import model_validator
 
-Team = Annotated[list[EntityConfig], Field(min_length=1, max_length=50)]
+Team = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=10)]
 
 
 class SimulationConfig(BaseModel):
     repetitions: PositiveInt
+    participants: Annotated[list[EntityConfig], Field(min_length=1)]
     teams: Annotated[list[Team], Field(min_length=2, max_length=10)]
 
+    @model_validator(mode="after")
+    def check_teams(self) -> Self:
+        for i, team in enumerate(self.teams):
+            for j, member in enumerate(team):
+                if member >= len(self.participants):
+                    raise ValueError(f"Party member {j} in team {i} is not listed in participants")
+        return self
 
-# Preserve the old spelling for downstream imports during this refactor.
-SimulatonConfig = SimulationConfig
+    def as_pure_list(self) -> list[list[EntityConfig]]:
+        out = []
+        for team in self.teams:
+            t = []
+            for member in team:
+                t.append(self.participants[member])
+            out.append(t)
+        return out
 
 
 class SimulationFinished(BaseModel):
