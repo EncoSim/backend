@@ -42,8 +42,6 @@ class Settings(BaseModel):
     jwt_alg: str = "HS256"
 
     # authentication / cookie
-    cookie_name: str = "Refresh-Token"
-    cookie_path: str = "/auth"
     cookie_secure: bool = True
     cookie_samesite: Literal["none", "lax", "strict"] = "strict"
 

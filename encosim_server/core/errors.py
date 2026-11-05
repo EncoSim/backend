@@ -1,9 +1,22 @@
 import logging
-from typing import Annotated, Any, ClassVar, Literal, Mapping, Self, Union
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    ClassVar,
+    Literal,
+    Mapping,
+    Self,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from fastapi import Request
 from pydantic import BaseModel, Field, create_model
 from starlette.responses import JSONResponse
+from typing_extensions import Iterable
 
 from encosim_server.characters.schema import CharDownload
 
@@ -83,6 +96,7 @@ class ApiError(Exception):
         super().__init__(self.message)
 
     def body(self) -> dict[str, Any]:
+        """Format exception as JSON response body"""
         content: dict[str, Any] = {"code": self.code, "message": self.message}
         if self.detail is not None:
             content["detail"] = self.detail.model_dump(mode="json")
@@ -101,21 +115,37 @@ class Raises:
 
     __slots__ = ("errors",)
 
-    errors: tuple[type[ApiError], ...]
+    errors: set[type[ApiError]]
 
     def __init__(self, *errors: type[ApiError]):
-        for e in errors:
-            if not isinstance(e, type) and issubclass(e, Exception):
-                raise TypeError("{e} is not an valid `Exception`")
-        self.errors = errors
+        for error in errors:
+            if not isinstance(error, type) or not issubclass(error, ApiError):
+                raise TypeError(f"{error!r} is not an ApiError subclass")
+        self.errors = set(errors)
 
-    def __class_getitem__(cls, errors: type[ApiError] | tuple[type[ApiError], ...]) -> Self:
-        items = errors if isinstance(errors, tuple) else (errors,)
+    def __class_getitem__(cls, errors: type[ApiError] | Iterable[type[ApiError]]) -> Self:
+        items = errors if isinstance(errors, Iterable) else (errors,)
         return cls(*items)
 
     def __repr__(self) -> str:
         names = ", ".join(error.__name__ for error in self.errors)
         return f"Raises[{names}]"
+
+
+def bubble(
+    *functions: Callable[..., Any],
+    initial: Iterable[type[ApiError]] | None = None,
+) -> set[type[ApiError]]:
+    """Bubble up `ApiError`s from function signatures"""
+    classes: set[type[ApiError]] = set(initial or ())
+    for function in functions:
+        annotation = get_type_hints(function, include_extras=True).get("return")
+        if get_origin(annotation) is not Annotated:
+            continue
+        for metadata in get_args(annotation)[1:]:
+            if isinstance(metadata, Raises):
+                classes |= metadata.errors
+    return classes
 
 
 def to_responses(*classes: type[ApiError]) -> dict[int | str, dict[str, Any]]:
@@ -133,11 +163,33 @@ def to_responses(*classes: type[ApiError]) -> dict[int | str, dict[str, Any]]:
                 Union[tuple(models)],  # type: ignore - function calls not allowed, but they do work?!
                 Field(discriminator="code"),
             ]
-        responses[status] = {
+        response: dict[str, Any] = {
             "model": model,
             "description": "; ".join(f"`{c.code}`: {c.default_message}" for c in group),
         }
+        if any(issubclass(c, Unauthorized) for c in group):
+            response["headers"] = {
+                "WWW-Authenticate": {
+                    "description": (
+                        "Bearer authentication challenge (present for invalid/missing "
+                        "bearer credentials)."
+                    ),
+                    "schema": {"type": "string"},
+                }
+            }
+        responses[status] = response
     return responses
+
+
+def to_responses_from(
+    *functions: Callable[..., Any], extra: Iterable[type[ApiError]] = ()
+) -> dict[int | str, dict[str, Any]]:
+    """Build FastAPI response docs from `Raises[...]` return annotations.
+
+    Use this on the manager methods called by a route. Errors raised directly by the
+    route or by dependencies belong in `extra` (or router-level `responses`).
+    """
+    return to_responses(*bubble(*functions, initial=extra))
 
 
 class InvalidGoogleToken(ApiError):
@@ -184,8 +236,10 @@ class CharacterOutdated(ApiError):
     detail_model = CharDownload
     detail_description = "Current version of character"
 
+
 class AllowedNumberDetail(BaseModel):
     allowed: int
+
 
 class TooManyCharacters(ApiError):
     status_code = 403

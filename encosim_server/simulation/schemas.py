@@ -9,9 +9,21 @@ Team = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=10)]
 
 
 class SimulationConfig(BaseModel):
-    repetitions: PositiveInt
-    participants: Annotated[list[EntityConfig], Field(min_length=1)]
-    teams: Annotated[list[Team], Field(min_length=2, max_length=10)]
+    """Simulation input. Team members are zero-based indices into `participants`."""
+
+    repetitions: Annotated[PositiveInt, Field(description="Number of simulation repetitions.")]
+    participants: Annotated[
+        list[EntityConfig],
+        Field(min_length=1, description="Entities referenced by the teams array."),
+    ]
+    teams: Annotated[
+        list[Team],
+        Field(
+            min_length=2,
+            max_length=10,
+            description="Teams as lists of zero-based participant indices",
+        ),
+    ]
 
     @model_validator(mode="after")
     def check_teams(self) -> Self:

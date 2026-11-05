@@ -12,9 +12,9 @@ from encosim_server.core import errors
 from encosim_server.core.security import new_refresh_token, split_refresh_token
 from encosim_server.core.settings import Settings
 from encosim_server.database import SESSIONS
+from encosim_server.users.manager import identity_hash
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus, UserProfile
-from encosim_server.users.manager import identity_hash
 from tests.conftest import Clock
 from tests.helpers import CHROME_WIN, FIREFOX_LINUX, ids_from_sessions, tamper_refresh_token
 

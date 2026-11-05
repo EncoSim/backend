@@ -193,6 +193,7 @@ class Supervisor:
 
     Services inherit settings via temporary config files
     """
+
     def __init__(self, settings: Settings, specs: Sequence[ServiceSpec], echo: bool = True):
         names = [spec.name for spec in specs]
         if len(set(names)) != len(names):
@@ -446,6 +447,7 @@ def probe_socket_factory(host: str, port: int) -> Callable[[], bool]:
                 return True
         except OSError:
             return False
+
     return probe
 
 

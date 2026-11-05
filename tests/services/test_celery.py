@@ -94,9 +94,7 @@ async def test_release_gives_the_slot_back(limiter: SimulationLimiter):
 async def test_concurrent_acquires_cannot_exceed_the_limit(limiter: SimulationLimiter):
     user = uuid4()
 
-    results = await asyncio.gather(
-        *(limiter.acquire(user) for _ in range(limiter.limit * 4))
-    )
+    results = await asyncio.gather(*(limiter.acquire(user) for _ in range(limiter.limit * 4)))
 
     assert sum(task_id is not None for task_id in results) == limiter.limit
     assert len(await limiter.active(user)) == limiter.limit

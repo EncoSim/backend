@@ -132,15 +132,21 @@ def load_base_settings() -> Settings:
 
 
 def pytest_sessionstart():
-    """Fail fast with one clear message instead of a timeout in every single test.
+    """Fail fast with one clear message instead of a timeout in every integration test.
 
-    Only MongoDB is checked: redis and the celery worker are started by the fixtures below.
+    Set ENCOSIM_SKIP_HEALTHCHECK=1 to skip the health check on startup.
     """
+    if os.environ.get("ENCOSIM_OPENAPI_ONLY") == "1":
+        return
     try:
         asyncio.run(health_check_mongo(load_base_settings()))
     except Exception as exc:
         traceback.print_exception(exc)
-        pytest.exit("Test setup failed", returncode=2)
+        pytest.exit(
+            "Test setup failed. Set ENCOSIM_SKIP_HEALTHCHECK=1 to skip the "
+            "health check on startup.",
+            returncode=2,
+        )
 
 
 @pytest.fixture(scope="session")

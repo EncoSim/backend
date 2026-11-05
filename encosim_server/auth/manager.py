@@ -37,7 +37,9 @@ class AuthManager:
 
     async def login_google(
         self, id_token: str, user_agent: str | None
-    ) -> Annotated[LoginResult, errors.Raises[errors.InvalidGoogleToken, errors.Banned]]:
+    ) -> Annotated[
+        LoginResult, errors.Raises[*errors.bubble(GoogleVerifier.verify), errors.Banned]
+    ]:
         id, profile = await self.google.verify(id_token)
         user, is_new = await self.users.upsert_login(id, profile)
         refresh, sid = await self.sessions.create(user, user_agent)
@@ -45,7 +47,9 @@ class AuthManager:
 
     async def refresh(
         self, refresh_token: str
-    ) -> Annotated[LoginResult, errors.Raises[errors.InvalidSession]]:
+    ) -> Annotated[
+        LoginResult, errors.Raises[*errors.bubble(SessionsManager.rotate), errors.InvalidSession]
+    ]:
         """refresh the login session"""
         new_refresh, session_id, user_id = await self.sessions.rotate(refresh_token)
         user = await self.users.get(user_id)
@@ -54,7 +58,7 @@ class AuthManager:
             raise errors.InvalidSession()
         return LoginResult(False, user, self._new_access(user, session_id), new_refresh)
 
-    async def logout(self, refresh_token: str | None) -> None:
+    async def logout(self, refresh_token: str | None):
         """Silent on failure. Uses the refresh cookie so it works with an expired access token."""
         if refresh_token:
             await self.sessions.terminate_by_token(refresh_token)

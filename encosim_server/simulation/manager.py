@@ -1,13 +1,12 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from celery.states import READY_STATES
 from fastapi.concurrency import run_in_threadpool
-from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.celery import PatchedCelery
@@ -40,7 +39,17 @@ class SimulationManager:
         self.limiter = celery.simulation_limiter
         self.records = db[SIMULATIONS]
 
-    async def submit(self, config: SimulationConfig, owner_id: UUID) -> SimulationResult:
+    @staticmethod
+    async def _submit(config: SimulationConfig, task_id: str):
+        return await run_in_threadpool(
+            cast(Task, handle_simulation).apply_async,
+            kwargs={"config": config.model_dump(mode="json")},
+            task_id=task_id,
+        )
+
+    async def submit(
+        self, config: SimulationConfig, owner_id: UUID
+    ) -> Annotated[SimulationResult, errors.Raises[errors.TooManySimulations]]:
         # Reap completed jobs whose worker was killed before its task-finally hooks ran.
         await self.list_pending(owner_id)
 
@@ -60,11 +69,7 @@ class SimulationManager:
                     "submitted_at": now,
                 }
             )
-            result = await run_in_threadpool(
-                cast(Task, handle_simulation).apply_async,  # casting, because proxy is invalid
-                kwargs={"config": config.model_dump(mode="json")},
-                task_id=task_id,
-            )
+            result = await self._submit(config, task_id)
         except Exception:
             try:
                 await self.records.delete_one({"_id": task_id, "owner_id": owner_id})
@@ -86,6 +91,7 @@ class SimulationManager:
         return await self.get_status(task_id, owner_id)
 
     async def list_pending(self, owner_id: UUID) -> list[str]:
+        """list pending tasks and clean up stale entries"""
         active = await self.limiter.active(owner_id)
         pending: list[str] = []
         for task_id in sorted(active):
@@ -101,7 +107,9 @@ class SimulationManager:
                 pending.append(task_id)
         return pending
 
-    async def get_status(self, task_id: str, owner_id: UUID) -> SimulationResult:
+    async def get_status(
+        self, task_id: str, owner_id: UUID
+    ) -> Annotated[SimulationResult, errors.Raises[errors.NotFound]]:
         if not self.limiter.task_belongs_to(task_id, owner_id):
             raise errors.NotFound()
         doc = await self.records.find_one({"_id": task_id, "owner_id": owner_id})
@@ -171,7 +179,9 @@ class SimulationManager:
             limit=self.settings.max_finished_simulations_per_user,
         )
 
-    async def abort(self, task_id: str, owner_id: UUID) -> None:
+    async def abort(
+        self, task_id: str, owner_id: UUID
+    ) -> Annotated[None, errors.Raises[errors.NotFound]]:
         if not self.limiter.task_belongs_to(task_id, owner_id):
             raise errors.NotFound()
         doc = await self.records.find_one({"_id": task_id, "owner_id": owner_id})
@@ -242,7 +252,9 @@ class SimulationManager:
                 records.append(SimulationRecord.model_validate(doc))
         return records
 
-    async def get_finished(self, task_id: str, owner_id: UUID) -> SimulationRecord:
+    async def get_finished(
+        self, task_id: str, owner_id: UUID
+    ) -> Annotated[SimulationRecord, errors.Raises[errors.NotFound]]:
         await self.get_status(task_id, owner_id)
         doc = await self.records.find_one(
             {
@@ -255,7 +267,9 @@ class SimulationManager:
             raise errors.NotFound()
         return SimulationRecord.model_validate(doc)
 
-    async def delete_finished(self, task_id: str, owner_id: UUID) -> None:
+    async def delete_finished(
+        self, task_id: str, owner_id: UUID
+    ) -> Annotated[None, errors.Raises[errors.NotFound]]:
         await self.get_finished(task_id, owner_id)
         deleted = await self.records.delete_one(
             {

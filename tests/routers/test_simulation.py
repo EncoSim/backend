@@ -131,7 +131,7 @@ async def test_finished_simulation_is_returned_directly(
 
     r = await alice.client.post("/simu", json=simulation_payload(repetitions=3))
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     assert r.json() == {"status": "success", "summary": "repetitions=3"}
     await eventually(lambda: no_jobs(alice), what="slot released")
 
@@ -145,7 +145,7 @@ async def test_crashed_simulation_is_reported_without_leaking_details(
 
     r = await alice.client.post("/simu", json=simulation_payload())
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     assert r.json() == {"status": "failed", "summary": "critical failure"}
     assert "boom" not in r.text
     await eventually(lambda: no_jobs(alice), what="slot released")
@@ -164,7 +164,7 @@ async def test_slow_simulation_returns_a_task_id_to_poll(
 
     r = await alice.client.post("/simu", json=simulation_payload())
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     body = r.json()
     assert body["status"] == "pending"
     task_id = body["task_id"]
@@ -201,7 +201,7 @@ async def test_users_cannot_start_more_simulations_than_allowed(
     limit = settings.max_simulations
 
     for _ in range(limit):
-        assert (await alice.client.post("/simu", json=simulation_payload())).status_code == 200
+        assert (await alice.client.post("/simu", json=simulation_payload())).status_code == 202
     r = await alice.client.post("/simu", json=simulation_payload())
 
     assert r.status_code == 429
@@ -209,7 +209,7 @@ async def test_users_cannot_start_more_simulations_than_allowed(
     assert r.json()["detail"] == {"allowed": limit}
     assert len(await job_ids(alice)) == limit
     # the limit is per user
-    assert (await bob.client.post("/simu", json=simulation_payload())).status_code == 200
+    assert (await bob.client.post("/simu", json=simulation_payload())).status_code == 202
 
 
 # --- job listing and status -----------------------------------------------------------------------
@@ -282,6 +282,7 @@ async def test_runaway_simulation_is_reported_as_timed_out(
     router_wait.seconds = 5
     again = await alice.client.post("/simu", json=simulation_payload())
     assert again.json()["status"] == "success"
+
 
 # --- task aborting --------------------------------------------------------------------------------
 
@@ -378,7 +379,6 @@ async def test_a_finished_job_cannot_be_aborted(
     assert r.status_code == 404  # its slot is gone, so there is nothing to abort
 
 
-
 @pytest.mark.usefixtures("worker")
 async def test_finished_history_keeps_configuration_and_result(
     login_as: LoginAs, use_task: Callable[[Any], None]
@@ -388,7 +388,7 @@ async def test_finished_history_keeps_configuration_and_result(
     config = simulation_payload(repetitions=3)
 
     submitted = await alice.client.post("/simu", json=config)
-    assert submitted.status_code == 200
+    assert submitted.status_code == 202
     assert submitted.json() == {"status": "success", "summary": "repetitions=3"}
 
     history = await alice.client.get("/simu/history")
@@ -418,7 +418,7 @@ async def test_failed_simulations_are_kept_in_history(
     alice = await login_as()
 
     submitted = await alice.client.post("/simu", json=simulation_payload())
-    assert submitted.status_code == 200
+    assert submitted.status_code == 202
     assert submitted.json() == {"status": "failed", "summary": "critical failure"}
 
     history = await alice.client.get("/simu/history")
@@ -437,7 +437,7 @@ async def test_history_retains_only_the_latest_ten_per_user(
     alice = await login_as()
     for _ in range(11):
         response = await alice.client.post("/simu", json=simulation_payload())
-        assert response.status_code == 200
+        assert response.status_code == 202
         assert response.json()["status"] == "success"
 
     history = await alice.client.get("/simu/history")
@@ -446,20 +446,19 @@ async def test_history_retains_only_the_latest_ten_per_user(
 
 
 @pytest.mark.usefixtures("worker")
-async def test_finished_history_is_private(
-    login_as: LoginAs, use_task: Callable[[Any], None]
-):
+async def test_finished_history_is_private(login_as: LoginAs, use_task: Callable[[Any], None]):
     use_task(tasks.summary_task)
     alice = await login_as("google:alice")
     bob = await login_as("google:bob")
     submitted = await alice.client.post("/simu", json=simulation_payload())
-    assert submitted.status_code == 200
+    assert submitted.status_code == 202
     record = (await alice.client.get("/simu/history")).json()[0]
     task_id = record["task_id"]
 
     assert (await bob.client.get("/simu/history")).json() == []
     assert (await bob.client.get(f"/simu/history/{task_id}")).status_code == 404
     assert (await bob.client.delete(f"/simu/history/{task_id}")).status_code == 404
+
 
 # --- the real simulator ---------------------------------------------------------------------------
 
@@ -472,7 +471,7 @@ async def test_real_simulation_end_to_end(login_as: LoginAs, router_wait: Simple
 
     r = await alice.client.post("/simu", json=simulation_payload(repetitions=1))
 
-    assert r.status_code == 200
+    assert r.status_code == 202
     body = r.json()
     if body["status"] == "pending":
         task_id = body["task_id"]

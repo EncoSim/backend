@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from pymongo.asynchronous.database import AsyncDatabase
 
 from encosim_server.app import create_app
+from encosim_server.auth.cookie import REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH
 from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
 from encosim_server.users.models import UserInDB
@@ -104,10 +105,10 @@ async def login_as(resources: Resources, make_client: Callable[..., httpx.AsyncC
 
         client = make_client(headers={"Authorization": f"Bearer {access_token}"})
         client.cookies.set(
-            resources.settings.cookie_name,
+            REFRESH_COOKIE_NAME,
             refresh_token,
             domain="localhost",
-            path="/api" + resources.settings.cookie_path,
+            path="/api" + REFRESH_COOKIE_PATH,
         )
         return LoggedIn(client, user, session_id, access_token, refresh_token)
 

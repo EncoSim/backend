@@ -80,7 +80,6 @@ def test_settings_survive_the_json_round_trip(tmp_path: Path):
     assert restored == original
 
 
-
 def test_the_json_file_is_private(tmp_path: Path):
     fp = write_config_file(tmp_path / "private.json")
     assert stat.S_IMODE(fp.stat().st_mode) == 0o600

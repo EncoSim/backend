@@ -20,6 +20,7 @@ class SessionsManager:
     Warning: sessions do not terminate immediately! Always validate the login session when
     accessing sensitive endpoints.
     """
+
     def __init__(self, settings: Settings, db: AsyncDatabase[Any]):
         self.settings = settings
         self.sessions = db[SESSIONS]

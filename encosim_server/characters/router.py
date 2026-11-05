@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from pydantic import UUID4
 
+from encosim_server.characters.manager import CharacterManager
 from encosim_server.characters.models import CharInDB
 from encosim_server.characters.schema import CharDownload, CharUpload, ManyCharDownload
 from encosim_server.core import errors
@@ -8,9 +9,11 @@ from encosim_server.depends import ActiveUserDep, ResourcesDep
 
 router = APIRouter(prefix="/chars/private", tags=["characters"])
 
+
 # make the linter happy, it does not know about response validation
 def downgrade(full: CharInDB) -> CharDownload:
     return CharDownload.model_validate(full, from_attributes=True, extra="ignore")
+
 
 @router.get("", responses=errors.to_responses(errors.Unauthorized))
 async def list_characters(res: ResourcesDep, user: ActiveUserDep) -> ManyCharDownload:
@@ -18,14 +21,20 @@ async def list_characters(res: ResourcesDep, user: ActiveUserDep) -> ManyCharDow
         characters=[downgrade(c) for c in await res.characters.list(user.user_id)]
     )
 
-COMMON = (errors.NotFound, errors.Unauthorized)
 
-@router.get("/{char_id}", responses=errors.to_responses(*COMMON))
+COMMON = (errors.Unauthorized,)
+
+
+@router.get("/{char_id}", responses=errors.to_responses_from(CharacterManager.get, extra=COMMON))
 async def get_character(res: ResourcesDep, user: ActiveUserDep, char_id: UUID4) -> CharDownload:
     return downgrade(await res.characters.get(char_id, user.user_id))
 
 
-@router.post("", status_code=201, responses=errors.to_responses(*COMMON, errors.TooManyCharacters))
+@router.post(
+    "",
+    status_code=201,
+    responses=errors.to_responses_from(CharacterManager.create, extra=COMMON),
+)
 async def create_character(
     res: ResourcesDep, user: ActiveUserDep, payload: CharUpload
 ) -> CharDownload:
@@ -33,7 +42,10 @@ async def create_character(
     return downgrade(await res.characters.create(user.user_id, payload))
 
 
-@router.put("/{char_id}", responses=errors.to_responses(*COMMON, errors.CharacterOutdated))
+@router.put(
+    "/{char_id}",
+    responses=errors.to_responses_from(CharacterManager.update, extra=COMMON),
+)
 async def update_character(
     res: ResourcesDep, user: ActiveUserDep, char_id: UUID4, payload: CharUpload
 ) -> CharDownload:
@@ -46,7 +58,12 @@ async def update_character(
     )
 
 
-@router.delete("/{char_id}", responses=errors.to_responses(*COMMON))
-async def delete_character(res: ResourcesDep, user: ActiveUserDep, char_id: UUID4) -> CharUpload:
-    char = await res.characters.delete(char_id=char_id, owner_id=user.user_id)
-    return CharUpload(version=0, data=char.data)
+@router.delete(
+    "/{char_id}",
+    status_code=200,
+    responses=errors.to_responses_from(CharacterManager.delete, extra=COMMON),
+    description="Delete character and return its latest state to allow a last recovery",
+)
+async def delete_character(res: ResourcesDep, user: ActiveUserDep, char_id: UUID4):
+    undo = await res.characters.delete(char_id=char_id, owner_id=user.user_id)
+    return CharUpload(version=0, data=undo.data)

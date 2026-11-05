@@ -52,9 +52,7 @@ class SimulationLimiter:
 
     async def acquire(self, user_id: UUID) -> str | None:
         task_id = self.new_task_id(user_id)
-        acquired = await self._acquire(
-            keys=[self.key(user_id)], args=[self.limit, task_id]
-        )
+        acquired = await self._acquire(keys=[self.key(user_id)], args=[self.limit, task_id])
         return task_id if acquired else None
 
     def task_exists(self, task_id: str) -> bool:

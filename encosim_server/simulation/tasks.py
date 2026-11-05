@@ -11,7 +11,6 @@ from celery.exceptions import (
 from celery.signals import task_failure
 from celery.worker.request import Request
 from encosim.api_endpoint import run_full_stat_recap_from_configs
-from encosim.core.entity_config import EntityConfig
 
 from encosim_server.celery import LimitedTask
 from encosim_server.simulation.history import finalize_simulation

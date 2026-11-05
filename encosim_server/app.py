@@ -42,7 +42,20 @@ def create_app(settings: Settings) -> FastAPI:
     # using uvicorn's root_path causes double prefixes, which breaks docs
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="The `root_path` parameter is deprecated.*")
-        app = FastAPI(lifespan=lifespan, debug=settings.debug, root_path=settings.root_path)
+        app = FastAPI(
+            title="EncoSim API",
+            description="HTTP API for EncoSim accounts, characters, and simulations.",
+            version="0.0.1",
+            # openapi_tags=[
+            #     {"name": "auth", "description": "Google login and session management."},
+            #     {"name": "characters", "description": "Private character management."},
+            #     {"name": "user", "description": "Current-user profile operations."},
+            #     {"name": "simulations", "description": "Simulation submission and history."},
+            # ],
+            lifespan=lifespan,
+            debug=settings.debug,
+            root_path=settings.root_path,
+        )
 
     app.add_exception_handler(errors.ApiError, errors.handle_api_error)  # type: ignore
     for router in (auth_router, char_router, user_router, simu_router):

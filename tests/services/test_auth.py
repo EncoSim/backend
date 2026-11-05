@@ -15,11 +15,13 @@ from tests.helpers import CHROME_WIN, FIREFOX_LINUX, fake_token, ids_from_sessio
 
 # --- helpers -----------------------------------------------------------------------------------
 
+
 async def login(
     auth: AuthManager, sub: str = "alice", user_agent: str | None = CHROME_WIN
 ) -> LoginResult:
     """login with fake google id token"""
     return await auth.login_google(fake_token(sub), user_agent)
+
 
 # --- login_google ---------------------------------------------------------------------------------
 
@@ -69,6 +71,7 @@ async def test_different_google_accounts_are_different_users(auth: AuthManager):
     bob = await login(auth, "bob")
 
     assert alice.user.user_id != bob.user.user_id
+
 
 async def test_only_first_login_creates_user(auth: AuthManager, users: UserManager):
     alice = await login(auth, "alice")

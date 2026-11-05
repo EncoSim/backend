@@ -25,10 +25,11 @@ class ActiveUser:
     user_id: UUID
     session_id: UUID
 
+
 async def get_optional_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     res: ResourcesDep,
-):
+) -> ActiveUser | None:
     if creds is None:
         return
     try:
@@ -37,19 +38,28 @@ async def get_optional_user(
         return
     return ActiveUser(user_id=claims.sub, session_id=claims.sid)
 
+
 OptionalUserDep = Annotated[ActiveUser | None, Depends(get_optional_user)]
 
 
-async def get_active_user(maybe_user: OptionalUserDep) -> ActiveUser:
+async def get_active_user(
+    maybe_user: OptionalUserDep,
+) -> Annotated[ActiveUser, errors.Raises[errors.Unauthorized]]:
     if maybe_user is None:
         raise errors.Unauthorized()
     return maybe_user
 
 
-ActiveUserDep = Annotated[ActiveUser, Depends(get_active_user)]
+ActiveUserDep = Annotated[
+    ActiveUser,
+    Depends(get_active_user),
+    errors.Raises[*errors.bubble(get_active_user)],
+]
 
 
-async def get_active_admin(user: ActiveUserDep, res: ResourcesDep) -> ActiveUser:
+async def get_active_admin(
+    user: ActiveUserDep, res: ResourcesDep
+) -> Annotated[ActiveUser, errors.Raises[errors.Unauthorized, errors.Restricted]]:
     # admin access should always be secure, so database performance is not that important
     # checking user and session protects resources from stale access tokens
     if not await res.sessions.is_valid(user.user_id, user.session_id):
@@ -64,4 +74,8 @@ async def get_active_admin(user: ActiveUserDep, res: ResourcesDep) -> ActiveUser
     return user
 
 
-ActiveAdminDep = Annotated[ActiveUser, Depends(get_active_admin)]
+ActiveAdminDep = Annotated[
+    ActiveUser,
+    Depends(get_active_admin),
+    errors.Raises[*errors.bubble(get_active_admin)],
+]

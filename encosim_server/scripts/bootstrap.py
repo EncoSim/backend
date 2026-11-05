@@ -172,9 +172,7 @@ class ConfigWriter:
             redis_conn=self.redis_dir / f"redis-{name}.sock",
             **kwargs,  # annoyingly, this ruins linter support...
         )
-        self.settings.append(
-            ConfigFileWriter(self.base_dir / "config" / f"{name}.json", model)
-        )
+        self.settings.append(ConfigFileWriter(self.base_dir / "config" / f"{name}.json", model))
 
     def bootstrap_and_write(self):
         self.base_dir.mkdir(parents=True, exist_ok=True)
