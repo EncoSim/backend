@@ -5,6 +5,7 @@ import pytest
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
+from encosim_server.core.settings import Settings
 from encosim_server.database import (
     SESSIONS,
     USERS,
@@ -13,10 +14,12 @@ from encosim_server.database import (
 from encosim_server.users.manager import identity_hash
 
 
-async def test_login_hash_is_unique(db: AsyncDatabase[Any]):
-    await db[USERS].insert_one({"_id": uuid4(), "login_hash": identity_hash("google:x")})
+async def test_login_hash_is_unique(db: AsyncDatabase[Any], settings: Settings):
+    await db[USERS].insert_one({"_id": uuid4(), "login_hash": identity_hash("google:x", settings)})
     with pytest.raises(DuplicateKeyError):
-        await db[USERS].insert_one({"_id": uuid4(), "login_hash": identity_hash("google:x")})
+        await db[USERS].insert_one(
+            {"_id": uuid4(), "login_hash": identity_hash("google:x", settings)}
+        )
         print(await db[USERS].index_information())
 
 

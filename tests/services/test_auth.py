@@ -29,7 +29,7 @@ async def login(
 async def test_login_creates_user_session_and_matching_tokens(resources: Resources):
     result = await login(resources.auth, sub="alice")
 
-    assert result.user.login_hash == identity_hash("google:alice")
+    assert result.user.login_hash == identity_hash("google:alice", resources.settings)
     assert await resources.users.get(result.user.user_id) is not None
 
     claims = decode_access_token(resources.settings, result.access_token)
@@ -73,7 +73,9 @@ async def test_different_google_accounts_are_different_users(auth: AuthManager):
     assert alice.user.user_id != bob.user.user_id
 
 
-async def test_only_first_login_creates_user(auth: AuthManager, users: UserManager):
+async def test_only_first_login_creates_user(
+    auth: AuthManager, users: UserManager, settings: Settings
+):
     alice = await login(auth, "alice")
     alice_again = await login(auth, "alice")
     assert alice.is_new
@@ -81,7 +83,7 @@ async def test_only_first_login_creates_user(auth: AuthManager, users: UserManag
 
     found, corrupt = await users.list()
     assert len(found) == 1
-    assert found[0].login_hash == identity_hash("google:alice")
+    assert found[0].login_hash == identity_hash("google:alice", settings)
     assert corrupt == []
 
 

@@ -52,6 +52,9 @@ class Settings(BaseModel):
     # authentication / session
     max_sessions_per_user: int = 10
 
+    # authentication / hash
+    identity_hash_key: SecretStr
+
     # privileges
     max_simulation_participants: PositiveInt = 15
     max_simulation_repetitions: PositiveInt = 50

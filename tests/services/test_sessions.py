@@ -22,13 +22,13 @@ MakeUser = Callable[..., UserInDB]
 
 
 @pytest.fixture
-def make_user(clock: Clock):
+def make_user(clock: Clock, settings: Settings):
     """Upsert a user the way the auth layer would after verifying Google."""
 
     def new(name: str = "alice", banned: bool = False) -> UserInDB:
         """create a unique fake user"""
         return UserInDB(
-            login_hash=identity_hash(f"google:{uuid4()}"),
+            login_hash=identity_hash(f"google:{uuid4()}", settings),
             _id=uuid4(),
             last_login=clock(),
             created_at=clock(),

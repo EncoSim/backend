@@ -164,6 +164,7 @@ class ConfigWriter:
             google_client_id=google_client_id,
             jwt_access_key=generate_password(256),
             auto_promote_to_admin=admin_mails or [],
+            identity_hash_key=generate_password(256),
             mongo_conn=self.mongo_writer.sock_path,
             mongo_rs=self.mongo_writer.replica_set,
             mongo_db=f"encosim-{name}-db",

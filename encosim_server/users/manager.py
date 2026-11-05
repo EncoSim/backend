@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -15,9 +16,13 @@ from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import UserProfile
 
 
-def identity_hash(sub: str) -> str:
-    # TODO: use a keyed hash (HMAC with a dedicated pepper) instead of plain sha256
-    return hashlib.sha256(sub.encode()).hexdigest()
+def identity_hash(sub: str, settings: Settings) -> str:
+    # login identities might be plain emails, so protect them with a keyed hash
+    return hmac.new(
+        settings.identity_hash_key.get_secret_value().encode(),
+        sub.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 class UserManager:
@@ -52,7 +57,7 @@ class UserManager:
 
         Assumes `login_id` belongs to an authorized party!
         """
-        login_hash = identity_hash(login_id)
+        login_hash = identity_hash(login_id, self.settings)
         res = await self.tombstones.find_one({"_id": login_hash})
         if res:
             raise errors.Banned()

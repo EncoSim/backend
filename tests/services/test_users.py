@@ -9,6 +9,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
+from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
 from encosim_server.users.manager import UserManager, identity_hash
 from encosim_server.users.models import UserInDB
@@ -53,9 +54,11 @@ async def bob(login_user: LoginUser) -> UserInDB:
 # --- upsert_login ------------------------------------------------------------------
 
 
-async def test_first_login_creates_a_user_and_fixture_works(clock: Clock, alice: UserInDB):
+async def test_first_login_creates_a_user_and_fixture_works(
+    clock: Clock, alice: UserInDB, settings: Settings
+):
     assert isinstance(alice.user_id, UUID)
-    assert alice.login_hash == identity_hash("google:alice")
+    assert alice.login_hash == identity_hash("google:alice", settings)
     assert alice.admin is False
     assert alice.ban_status.banned is False
     assert alice.profile.name == "alice"
@@ -118,10 +121,12 @@ async def test_banned_user_cannot_log_in(login_user: LoginUser, users: UserManag
         await login_user("alice")
 
 
-async def test_tombstoned_identity_cannot_log_in(login_user: LoginUser, db: AsyncDatabase[Any]):
+async def test_tombstoned_identity_cannot_log_in(
+    login_user: LoginUser, db: AsyncDatabase[Any], settings: Settings
+):
     await db[TOMBSTONES].insert_one(
         {
-            "_id": identity_hash("google:alice"),
+            "_id": identity_hash("google:alice", settings),
             "ban_status": BanStatus(banned=True, number=1).model_dump(),
         }
     )
