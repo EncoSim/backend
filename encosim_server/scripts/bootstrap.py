@@ -146,7 +146,7 @@ class ConfigWriter:
             mongo_port,
             replica_set,
         )
-        self.settings: list[ConfigFileWriter] = []
+        self.setting_writers: list[tuple[str, ConfigFileWriter]] = []
 
     def add_setup(
         self,
@@ -173,7 +173,9 @@ class ConfigWriter:
             redis_conn=self.redis_dir / f"redis-{name}.sock",
             **kwargs,  # annoyingly, this ruins linter support...
         )
-        self.settings.append(ConfigFileWriter(self.base_dir / "config" / f"{name}.json", model))
+        self.setting_writers.append(
+            (name, ConfigFileWriter(self.base_dir / "config" / f"{name}.json", model))
+        )
 
     def bootstrap_and_write(self):
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -183,11 +185,11 @@ class ConfigWriter:
         print("Bootstrapping MongoDB...")
         users = [
             MongoUser(
-                db=e.settings.mongo_db,
-                username=e.settings.mongo_user,
-                password=e.settings.mongo_pass,
+                db=w.settings.mongo_db,
+                username=w.settings.mongo_user,
+                password=w.settings.mongo_pass,
             )
-            for e in self.settings
+            for _, w in self.setting_writers
         ]
         self.mongo_writer.bootstrap(users)
         print("Done")
@@ -197,9 +199,9 @@ class ConfigWriter:
         def dot(end: str = ""):
             print(".", end=end, flush=True)
 
-        for e in self.settings:
+        for _, w in self.setting_writers:
             dot()
-            e.save_settings()
+            w.save_settings()
         dot()
         self.save_redis_config()
         dot()
@@ -208,13 +210,11 @@ class ConfigWriter:
         self.save_readme()
         print("Done", flush=True)
 
-    @property
-    def redis_main_conf(self) -> Path:
-        return self.redis_dir / "redis-production.conf"
+    def redis_conf_path(self, name: str) -> Path:
+        return self.redis_dir / f"redis-{name}.conf"
 
     def save_redis_config(self):
-        for config in self.settings:
-            name = config.fp.stem
+        for name, config in self.setting_writers:
             data_dir = self.redis_dir / name
             data_dir.mkdir(parents=True, exist_ok=True)
             s = f"""\
@@ -228,28 +228,30 @@ class ConfigWriter:
 
     def save_supervisord_config(self):
         common = (
-            f"environment=ENCOSIM_CONFIG_FILE={self.settings[0].fp}\n"
+            # f"environment=ENCOSIM_CONFIG_FILE={self.settings[0].fp}\n"
             f"autostart=no\n"
             f"autorestart=yes\n"
             f"startsecs=10\n"
             f"stdout_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stdout.log\n"
             f"stderr_logfile={self.logs_dir}/%(program_name)s-%(process_num)s.stderr.log\n"
         )
+        encosim_config_name = self.setting_writers[0][0]
+        encosim_config_file = self.setting_writers[0][1].fp
         write_file(
             self.base_dir / "encosim.ini",
             f"[program:mongo]\n"
             f"command=mongod --config {self.mongo_writer.conf_path}\n"
             f"{common}\n"
             f"[program:encosim-redis]\n"
-            f"command=redis-server {self.redis_main_conf}\n"
+            f"command=redis-server {self.redis_conf_path(encosim_config_name)}\n"
             f"{common}\n"
             f"[program:encosim-celery]\n"
             f"directory={PROJECT_ROOT}\n"
-            f"command=uv run celery --config {self.settings[0].fp}\n"
+            f"command={sys.executable} -m encosim_server worker --config {encosim_config_file}\n"
             f"{common}\n"
             f"[program:encosim-backend]\n"
             f"directory={PROJECT_ROOT}\n"
-            f"command={sys.executable} -m encosim_server.app --config {self.settings[0].fp}\n"
+            f"command={sys.executable} -m encosim_server serve --config {encosim_config_file}\n"
             f"{common}\n",
         )
 
