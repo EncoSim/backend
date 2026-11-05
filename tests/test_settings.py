@@ -15,6 +15,7 @@ from encosim_server.core.settings import Settings
 REQUIRED = {
     "google_client_id": "client-id",
     "jwt_access_key": "k" * 40,
+    "identity_hash_key": "K" * 40,
     "mongo_conn": Path("/tmp/mongo.sock"),
     "mongo_rs": "rs0",
     "mongo_db": "db-test",
