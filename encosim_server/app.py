@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import TypedDict
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from encosim_server.auth.google import FakeGoogleVerifier, RealGoogleVerifier
 from encosim_server.auth.router import router as auth_router
@@ -46,15 +47,17 @@ def create_app(settings: Settings) -> FastAPI:
             title="EncoSim API",
             description="HTTP API for EncoSim accounts, characters, and simulations.",
             version="0.0.1",
-            # openapi_tags=[
-            #     {"name": "auth", "description": "Google login and session management."},
-            #     {"name": "characters", "description": "Private character management."},
-            #     {"name": "user", "description": "Current-user profile operations."},
-            #     {"name": "simulations", "description": "Simulation submission and history."},
-            # ],
             lifespan=lifespan,
             debug=settings.debug,
             root_path=settings.root_path,
+        )
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
         )
 
     app.add_exception_handler(errors.ApiError, errors.handle_api_error)  # type: ignore

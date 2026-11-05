@@ -114,6 +114,7 @@ def main():
         bind="localhost",
         port=8000,
         debug=True,
+        cors_origins=["*"],
         log_level="DEBUG",
         google_client_id="FAKE",
         google_fake_provider=True,

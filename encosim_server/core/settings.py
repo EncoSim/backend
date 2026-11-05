@@ -24,6 +24,7 @@ class Settings(BaseModel):
     workers: PositiveInt = 4
     debug: bool = False
     root_path: str = "/api"
+    cors_origins: tuple[str, ...] = ()
 
     # logging
     log_level: str = "INFO"
@@ -47,7 +48,7 @@ class Settings(BaseModel):
 
     # authentication / admins
     # for testing and demos only
-    auto_promote_to_admin: list[EmailStr] = Field(default_factory=list)
+    auto_promote_to_admin: tuple[EmailStr, ...] = ()
 
     # authentication / session
     max_sessions_per_user: int = 10
@@ -88,8 +89,10 @@ class Settings(BaseModel):
             logger.warning("INSECURE SETTINGS: Debug logging may leak data!")
         if len(self.jwt_access_key.get_secret_value()) < 32:
             logger.warning("INSECURE SETTINGS: JWT are not secure!")
-        if len(self.auto_promote_to_admin) > 0:
+        if self.auto_promote_to_admin != ():
             logger.warning("INSECURE SETTINGS: Automatic admin promotion is enabled!")
+        if self.cors_origins != ():
+            logger.warning("INSECURE SETTINGS: CORS is enabled!")
         if self.google_fake_provider:
             logger.warning("INSECURE SETTINGS: Using fake google authentication!")
         return self
