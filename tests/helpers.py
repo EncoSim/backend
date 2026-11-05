@@ -55,7 +55,7 @@ async def eventually(
 def simulation_payload(
     repetitions: int = 1, team_sizes: tuple[int, ...] = (1, 1)
 ) -> dict[str, Any]:
-    """Request body for POST /simu: one team per entry of `team_sizes`."""
+    """Request body for POST /simulation: one team per entry of `team_sizes`."""
     entity = create_default().model_dump(mode="json")
     return SimulationConfig(
         repetitions=repetitions, participants=[entity], teams=[[0] * n for n in team_sizes]

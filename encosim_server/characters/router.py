@@ -7,7 +7,7 @@ from encosim_server.characters.schema import CharDownload, CharUpload, ManyCharD
 from encosim_server.core import errors
 from encosim_server.depends import ActiveUserDep, ResourcesDep
 
-router = APIRouter(prefix="/chars/private", tags=["characters"])
+router = APIRouter(prefix="/characters/owned", tags=["characters"])
 
 
 # make the linter happy, it does not know about response validation

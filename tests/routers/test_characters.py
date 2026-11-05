@@ -1,4 +1,4 @@
-"""Endpoint tests for the characters router (/chars/private)."""
+"""Endpoint tests for the characters router (/characters/owned)."""
 
 from typing import Any, Literal, overload
 from uuid import uuid1, uuid4
@@ -12,7 +12,7 @@ from encosim_server.core.settings import Settings
 from encosim_server.resources import Resources
 from tests.routers.conftest import LoggedIn, LoginAs
 
-BASE = "/chars/private"
+BASE = "/characters/owned"
 
 
 def char_body(hp: int = 50, version: int = 0) -> dict[str, Any]:

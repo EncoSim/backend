@@ -10,7 +10,7 @@ from encosim_server.simulation.schemas import (
     SimulationResult,
 )
 
-router = APIRouter(prefix="/simu", tags=["simulations"])
+router = APIRouter(prefix="/simulation", tags=["simulations"])
 
 COMMON = (errors.Unauthorized,)
 

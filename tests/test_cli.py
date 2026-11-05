@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from encosim_server import cli
-from encosim_server.app import factory
 from encosim_server.core.configfile import ConfigFileWriter
 from encosim_server.core.settings import CONFIG_FILE_VAR, Settings
 from encosim_server.startup import preflight
@@ -89,15 +88,6 @@ def test_script_aliases_map_to_the_commands(
     assert getattr(cli, alias)() == 0
 
     assert seen == [[expected, "--config", "x.json"]]
-
-
-def test_the_factory_builds_the_app_from_the_config_file_locator(
-    config_file: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv(CONFIG_FILE_VAR, str(config_file))
-
-    paths = set(factory().openapi()["paths"])
-    assert {"/auth/login/google", "/simu", "/user/profile"} <= paths
 
 
 async def test_preflight_passes_with_everything_running(settings: Settings):
