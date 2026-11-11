@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from celery import Task
@@ -16,14 +16,15 @@ from encosim_server.database import SIMULATIONS
 from encosim_server.simulation.history import finalize_simulation
 from encosim_server.simulation.schemas import (
     SimulationConfig,
-    SimulationFinished,
-    SimulationPending,
+    SimulationEntry,
+    SimulationPendingRecord,
     SimulationRecord,
-    SimulationResult,
 )
 from encosim_server.simulation.tasks import handle_simulation
 
 logger = logging.getLogger(__name__)
+
+FINISHED = ["success", "failed"]
 
 
 class SimulationManager:
@@ -49,7 +50,7 @@ class SimulationManager:
 
     async def submit(
         self, config: SimulationConfig, owner_id: UUID
-    ) -> Annotated[SimulationResult, errors.Raises[errors.TooManySimulations]]:
+    ) -> Annotated[SimulationEntry, errors.Raises[errors.TooManySimulations]]:
         # Reap completed jobs whose worker was killed before its task-finally hooks ran.
         await self.list_pending(owner_id)
 
@@ -88,7 +89,7 @@ class SimulationManager:
 
             if not isinstance(exc, CeleryTimeout):
                 logger.exception("Could not wait for simulation %s", task_id)
-        return await self.get_status(task_id, owner_id)
+        return await self.get(task_id, owner_id)
 
     async def list_pending(self, owner_id: UUID) -> list[str]:
         """list pending tasks and clean up stale entries"""
@@ -99,26 +100,27 @@ class SimulationManager:
                 self.limiter.release_sync(task_id)
                 continue
             try:
-                status = await self.get_status(task_id, owner_id)
+                entry = await self.get(task_id, owner_id)
             except errors.NotFound:
                 self.limiter.release_sync(task_id)
                 continue
-            if isinstance(status, SimulationPending):
+            if entry.status == "pending":
                 pending.append(task_id)
         return pending
 
-    async def get_status(
+    async def get(
         self, task_id: str, owner_id: UUID
-    ) -> Annotated[SimulationResult, errors.Raises[errors.NotFound]]:
+    ) -> Annotated[SimulationEntry, errors.Raises[errors.NotFound]]:
+        """A single simulation of the user, pending or finished, including its configuration."""
         if not self.limiter.task_belongs_to(task_id, owner_id):
             raise errors.NotFound()
         doc = await self.records.find_one({"_id": task_id, "owner_id": owner_id})
         if doc is None:
             raise errors.NotFound()
 
-        if doc.get("status") in ("success", "failed"):
+        if doc.get("status") in FINISHED:
             self.limiter.release_sync(task_id)
-            return SimulationFinished(status=doc["status"], summary=doc["summary"])
+            return SimulationRecord.model_validate(doc)
 
         result = self.celery.AsyncResult(task_id)
         state, value, info = await run_in_threadpool(
@@ -127,21 +129,48 @@ class SimulationManager:
         if state not in READY_STATES:
             # The task may have committed its history just before Celery stores its result.
             fresh = await self.records.find_one({"_id": task_id, "owner_id": owner_id})
-            if fresh and fresh.get("status") in ("success", "failed"):
+            if fresh and fresh.get("status") in FINISHED:
                 self.limiter.release_sync(task_id)
-                return SimulationFinished(status=fresh["status"], summary=fresh["summary"])
+                return SimulationRecord.model_validate(fresh)
             if not self.limiter.task_exists(task_id):
                 raise errors.NotFound()
-            return SimulationPending(task_id=task_id)
+            return SimulationPendingRecord.model_validate(doc)
 
         # A terminal Celery result can be observed before/without the task's history hook
         # (e.g. a worker process killed by a hard time limit). Backfill the domain record.
         await self._persist_backend_outcome(task_id, owner_id, state, value, info)
         self.limiter.release_sync(task_id)
         fresh = await self.records.find_one({"_id": task_id, "owner_id": owner_id})
-        if fresh and fresh.get("status") in ("success", "failed"):
-            return SimulationFinished(status=fresh["status"], summary=fresh["summary"])
-        return self._summarize(state, value, info, task_id)
+        if fresh and fresh.get("status") in FINISHED:
+            return SimulationRecord.model_validate(fresh)
+        # The outcome could not be written to the record; report it anyway rather than
+        # claiming the simulation is still pending.
+        status, summary, error_type = self._outcome(state, value, info)
+        return SimulationRecord.model_validate(
+            {
+                **doc,
+                "status": status,
+                "summary": summary,
+                "error_type": error_type,
+                "finished_at": datetime.now(timezone.utc),
+            }
+        )
+
+    @staticmethod
+    def _outcome(
+        state: str, value: Any, info: Any
+    ) -> tuple[Literal["success", "failed"], str, str | None]:
+        """Status, summary and error type for a terminal Celery state."""
+        if state == "SUCCESS":
+            return "success", str(value), None
+        summary = (
+            "simulation timed out"
+            if isinstance(info, (TimeLimitExceeded, SoftTimeLimitExceeded))
+            else "simulation aborted"
+            if state == "REVOKED"
+            else "critical failure"
+        )
+        return "failed", summary, type(info).__name__ if info is not None else state
 
     async def _persist_backend_outcome(
         self,
@@ -151,22 +180,7 @@ class SimulationManager:
         value: Any,
         info: Any,
     ) -> None:
-        if state == "SUCCESS":
-            status = "success"
-            summary = str(value)
-            error_type = None
-        else:
-            status = "failed"
-            value = None
-            summary = (
-                "simulation timed out"
-                if isinstance(info, (TimeLimitExceeded, SoftTimeLimitExceeded))
-                else "simulation aborted"
-                if state == "REVOKED"
-                else "critical failure"
-            )
-            error_type = type(info).__name__ if info is not None else state
-
+        status, summary, error_type = self._outcome(state, value, info)
         await run_in_threadpool(
             finalize_simulation,
             self.celery.backend,
@@ -192,7 +206,7 @@ class SimulationManager:
         result = self.celery.AsyncResult(task_id)
         state = await run_in_threadpool(lambda: result.state)
         if state in READY_STATES:
-            await self.get_status(task_id, owner_id)
+            await self.get(task_id, owner_id)
             raise errors.NotFound()
 
         # Claim the terminal history outcome before broadcasting revoke. This prevents a
@@ -238,43 +252,27 @@ class SimulationManager:
             raise
         self.limiter.release_sync(task_id)
 
-    async def list_finished(self, owner_id: UUID) -> list[SimulationRecord]:
-        # Reconcile terminal Celery states before exposing the durable history collection.
-        await self.list_pending(owner_id)
-        records: list[SimulationRecord] = []
-        cursor = self.records.find(
-            {"owner_id": owner_id, "status": {"$in": ["success", "failed"]}}
-        ).sort([("finished_at", -1), ("_id", -1)])
+    async def list_all(self, owner_id: UUID) -> list[SimulationEntry]:
+        """All simulations of the user, pending and finished, newest submission first."""
+        # Reconcile terminal Celery states before exposing the durable records.
+        pending_ids = set(await self.list_pending(owner_id))
+        entries: list[SimulationEntry] = []
+        cursor = self.records.find({"owner_id": owner_id}).sort([("submitted_at", -1), ("_id", -1)])
         async with cursor:
             async for doc in cursor:
-                records.append(SimulationRecord.model_validate(doc))
-        return records
-
-    async def get_finished(
-        self, task_id: str, owner_id: UUID
-    ) -> Annotated[SimulationRecord, errors.Raises[errors.NotFound]]:
-        await self.get_status(task_id, owner_id)
-        doc = await self.records.find_one(
-            {
-                "_id": task_id,
-                "owner_id": owner_id,
-                "status": {"$in": ["success", "failed"]},
-            }
-        )
-        if doc is None:
-            raise errors.NotFound()
-        return SimulationRecord.model_validate(doc)
+                if doc.get("status") in FINISHED:
+                    entries.append(SimulationRecord.model_validate(doc))
+                elif doc["_id"] in pending_ids:
+                    entries.append(SimulationPendingRecord.model_validate(doc))
+                # else: a record without a live task (e.g. a crashed submit); not listed
+        return entries
 
     async def delete_finished(
         self, task_id: str, owner_id: UUID
     ) -> Annotated[None, errors.Raises[errors.NotFound]]:
-        await self.get_finished(task_id, owner_id)
+        await self.get(task_id, owner_id)  # reconcile; NotFound if unknown
         deleted = await self.records.delete_one(
-            {
-                "_id": task_id,
-                "owner_id": owner_id,
-                "status": {"$in": ["success", "failed"]},
-            }
+            {"_id": task_id, "owner_id": owner_id, "status": {"$in": FINISHED}}
         )
         if not deleted.deleted_count:
             raise errors.NotFound()
@@ -282,17 +280,3 @@ class SimulationManager:
             await run_in_threadpool(self.celery.backend.forget, task_id)  # type: ignore
         except Exception:
             logger.exception("Could not remove Celery result for deleted simulation %s", task_id)
-
-    @staticmethod
-    def _summarize(state: str, value: Any, info: Any, task_id: str) -> SimulationResult:
-        if state == "SUCCESS":
-            return SimulationFinished(status="success", summary=str(value))
-        if state == "REVOKED":
-            return SimulationFinished(status="failed", summary="simulation aborted")
-        if state == "FAILURE":
-            timed_out = isinstance(info, (TimeLimitExceeded, SoftTimeLimitExceeded))
-            return SimulationFinished(
-                status="failed",
-                summary="simulation timed out" if timed_out else "critical failure",
-            )
-        return SimulationPending(task_id=task_id)

@@ -43,30 +43,31 @@ class SimulationConfig(BaseModel):
         return out
 
 
-class SimulationFinished(BaseModel):
-    status: Literal["failed", "success"]
-    summary: str
+class _SimulationBase(BaseModel):
+    """Fields stored for every simulation from the moment it is submitted."""
 
-
-class SimulationPending(BaseModel):
-    status: Literal["pending"] = "pending"
-    task_id: str
-
-
-SimulationResult = Annotated[SimulationFinished | SimulationPending, Field(discriminator="status")]
-
-
-class SimulationList(BaseModel):
-    ids: list[str]
-
-
-class SimulationRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     task_id: str = Field(validation_alias="_id")
     config: SimulationConfig
+    submitted_at: datetime
+
+
+class SimulationPendingRecord(_SimulationBase):
+    """A simulation that is queued or running."""
+
+    status: Literal["pending"] = "pending"
+
+
+class SimulationRecord(_SimulationBase):
+    """A finished simulation as kept in the user's history."""
+
     status: Literal["failed", "success"]
     summary: str
     error_type: str | None = None
-    submitted_at: datetime
     finished_at: datetime
+
+
+SimulationEntry = Annotated[
+    SimulationPendingRecord | SimulationRecord, Field(discriminator="status")
+]

@@ -51,9 +51,15 @@ def router_wait(monkeypatch: MonkeyPatch):
 
 
 async def job_ids(user: LoggedIn) -> list[str]:
+    """Ids of the pending simulations in the user's simulation list."""
     r = await user.client.get("/simulation")
     assert r.status_code == 200
-    return r.json()["ids"]
+    return sorted(item["task_id"] for item in r.json() if item["status"] == "pending")
+
+
+def outcome(entry: dict[str, Any]) -> dict[str, Any]:
+    """Status (and summary, once finished) of a simulation entry."""
+    return {key: entry[key] for key in ("status", "summary") if key in entry}
 
 
 async def no_jobs(user: LoggedIn) -> bool:
@@ -132,7 +138,7 @@ async def test_finished_simulation_is_returned_directly(
     r = await alice.client.post("/simulation", json=simulation_payload(repetitions=3))
 
     assert r.status_code == 202
-    assert r.json() == {"status": "success", "summary": "repetitions=3"}
+    assert outcome(r.json()) == {"status": "success", "summary": "repetitions=3"}
     await eventually(lambda: no_jobs(alice), what="slot released")
 
 
@@ -146,7 +152,7 @@ async def test_crashed_simulation_is_reported_without_leaking_details(
     r = await alice.client.post("/simulation", json=simulation_payload())
 
     assert r.status_code == 202
-    assert r.json() == {"status": "failed", "summary": "critical failure"}
+    assert outcome(r.json()) == {"status": "failed", "summary": "critical failure"}
     assert "boom" not in r.text
     await eventually(lambda: no_jobs(alice), what="slot released")
 
@@ -171,6 +177,7 @@ async def test_slow_simulation_returns_a_task_id_to_poll(
     assert task_id.startswith(alice.user.user_id.hex + "+")
     assert await job_ids(alice) == [task_id]
     assert (await alice.client.get(f"/simulation/{task_id}")).json() == body
+    assert body["config"] == simulation_payload()
 
     redis_client.set(gate_key(task_id), 1, ex=60)  # let the task finish
 
@@ -178,7 +185,7 @@ async def test_slow_simulation_returns_a_task_id_to_poll(
         return (await alice.client.get(f"/simulation/{task_id}")).json()
 
     done = await eventually(lambda: _not_pending(status()), what="job finished")
-    assert done == {"status": "success", "summary": "released"}
+    assert outcome(done) == {"status": "success", "summary": "released"}
     assert await job_ids(alice) == []
 
 
@@ -270,8 +277,8 @@ async def test_runaway_simulation_is_reported_as_timed_out(
         return (await alice.client.get(f"/simulation/{task_id}")).json()
 
     done = await eventually(lambda: _not_pending(status()), timeout=20, what="job timed out")
-    assert done == {"status": "failed", "summary": "simulation timed out"}
-    history = await alice.client.get("/simulation/history")
+    assert outcome(done) == {"status": "failed", "summary": "simulation timed out"}
+    history = await alice.client.get("/simulation")
     assert any(
         item["task_id"] == task_id and item["summary"] == "simulation timed out"
         for item in history.json()
@@ -303,12 +310,12 @@ async def test_a_running_job_that_ignores_signals_can_be_aborted(
     task_id = (await alice.client.post("/simulation", json=simulation_payload())).json()["task_id"]
     pid = await eventually(lambda: running_pid(worker_process, task_id), what="task running")
 
-    r = await alice.client.delete(f"/simulation/{task_id}")
+    r = await alice.client.post(f"/simulation/{task_id}/abort")
 
     assert r.status_code == 200
     await eventually(lambda: not is_running(pid), timeout=5, what="pool process killed")
     status = await alice.client.get(f"/simulation/{task_id}")
-    assert status.json() == {"status": "failed", "summary": "simulation aborted"}
+    assert outcome(status.json()) == {"status": "failed", "summary": "simulation aborted"}
     assert await job_ids(alice) == []
 
 
@@ -330,15 +337,15 @@ async def test_a_queued_job_never_runs_once_it_is_aborted(
     use_task(tasks.summary_task)  # would end as "success" if the worker ever ran it
     queued = (await alice.client.post("/simulation", json=simulation_payload())).json()["task_id"]
 
-    assert (await alice.client.delete(f"/simulation/{queued}")).status_code == 200
+    assert (await alice.client.post(f"/simulation/{queued}/abort")).status_code == 200
     for task_id in running:
         redis_client.set(gate_key(task_id), 1, ex=60)
     await eventually(lambda: no_jobs(alice), what="running jobs finished")
     worker_process.wait_idle(timeout=15)  # the worker has gone through its queue
 
     status = await alice.client.get(f"/simulation/{queued}")
-    assert status.json() == {"status": "failed", "summary": "simulation aborted"}
-    history = await alice.client.get("/simulation/history")
+    assert outcome(status.json()) == {"status": "failed", "summary": "simulation aborted"}
+    history = await alice.client.get("/simulation")
     assert any(
         item["task_id"] == queued and item["summary"] == "simulation aborted"
         for item in history.json()
@@ -356,7 +363,7 @@ async def test_only_the_owner_can_abort_a_job(
     unknown = f"{alice.user.user_id.hex}+{uuid4().hex}"
 
     for user, target in ((bob, task_id), (alice, unknown), (alice, "garbage")):
-        r = await user.client.delete(f"/simulation/{target}")
+        r = await user.client.post(f"/simulation/{target}/abort")
         assert r.status_code == 404, target
         assert r.json()["code"] == "not_found"
     assert await job_ids(alice) == [task_id]  # still there, still running
@@ -376,7 +383,7 @@ async def test_a_finished_job_cannot_be_aborted(
     redis_client.set(gate_key(task_id), 1, ex=60)
     await eventually(lambda: no_jobs(alice), what="job finished")
 
-    r = await alice.client.delete(f"/simulation/{task_id}")
+    r = await alice.client.post(f"/simulation/{task_id}/abort")
 
     assert r.status_code == 404  # its slot is gone, so there is nothing to abort
 
@@ -391,9 +398,9 @@ async def test_finished_history_keeps_configuration_and_result(
 
     submitted = await alice.client.post("/simulation", json=config)
     assert submitted.status_code == 202
-    assert submitted.json() == {"status": "success", "summary": "repetitions=3"}
+    assert outcome(submitted.json()) == {"status": "success", "summary": "repetitions=3"}
 
-    history = await alice.client.get("/simulation/history")
+    history = await alice.client.get("/simulation")
     assert history.status_code == 200
     assert len(history.json()) == 1
     record = history.json()[0]
@@ -402,13 +409,13 @@ async def test_finished_history_keeps_configuration_and_result(
     assert record["summary"] == "repetitions=3"
     task_id = record["task_id"]
 
-    fetched = await alice.client.get(f"/simulation/history/{task_id}")
+    fetched = await alice.client.get(f"/simulation/{task_id}")
     assert fetched.status_code == 200
     assert fetched.json() == record
 
-    deleted = await alice.client.delete(f"/simulation/history/{task_id}")
+    deleted = await alice.client.delete(f"/simulation/{task_id}")
     assert deleted.status_code == 200
-    assert (await alice.client.get("/simulation/history")).json() == []
+    assert (await alice.client.get("/simulation")).json() == []
 
 
 @pytest.mark.usefixtures("worker")
@@ -420,9 +427,9 @@ async def test_failed_simulations_are_kept_in_history(
 
     submitted = await alice.client.post("/simulation", json=simulation_payload())
     assert submitted.status_code == 202
-    assert submitted.json() == {"status": "failed", "summary": "critical failure"}
+    assert outcome(submitted.json()) == {"status": "failed", "summary": "critical failure"}
 
-    history = await alice.client.get("/simulation/history")
+    history = await alice.client.get("/simulation")
     assert history.status_code == 200
     assert len(history.json()) == 1
     assert history.json()[0]["status"] == "failed"
@@ -440,7 +447,7 @@ async def test_history_retains_only_the_latest_ten_per_user(
         assert response.status_code == 202
         assert response.json()["status"] == "success"
 
-    history = await alice.client.get("/simulation/history")
+    history = await alice.client.get("/simulation")
     assert history.status_code == 200
     assert len(history.json()) == 10
 
@@ -452,12 +459,52 @@ async def test_finished_history_is_private(login_as: LoginAs, use_task: Callable
     bob = await login_as("google:bob")
     submitted = await alice.client.post("/simulation", json=simulation_payload())
     assert submitted.status_code == 202
-    record = (await alice.client.get("/simulation/history")).json()[0]
+    record = (await alice.client.get("/simulation")).json()[0]
     task_id = record["task_id"]
 
-    assert (await bob.client.get("/simulation/history")).json() == []
-    assert (await bob.client.get(f"/simulation/history/{task_id}")).status_code == 404
-    assert (await bob.client.delete(f"/simulation/history/{task_id}")).status_code == 404
+    assert (await bob.client.get("/simulation")).json() == []
+    assert (await bob.client.get(f"/simulation/{task_id}")).status_code == 404
+    assert (await bob.client.delete(f"/simulation/{task_id}")).status_code == 404
+
+
+@pytest.mark.usefixtures("worker")
+async def test_list_contains_pending_and_finished_simulations_newest_first(
+    login_as: LoginAs, use_task: Callable[[Any], None], router_wait: SimpleNamespace
+):
+    use_task(tasks.gated_task)
+    router_wait.seconds = 0.2
+    alice = await login_as()
+    pending = (await alice.client.post("/simulation", json=simulation_payload())).json()["task_id"]
+    use_task(tasks.summary_task)
+    router_wait.seconds = 5
+    finished = await alice.client.post("/simulation", json=simulation_payload(repetitions=2))
+    assert finished.json()["status"] == "success"
+
+    r = await alice.client.get("/simulation")
+
+    assert r.status_code == 200
+    entries = r.json()
+    assert [outcome(e) for e in entries] == [
+        {"status": "success", "summary": "repetitions=2"},
+        {"status": "pending"},
+    ]
+    assert entries[1]["task_id"] == pending
+    assert all(e["config"] for e in entries)
+
+
+@pytest.mark.usefixtures("worker")
+async def test_a_pending_simulation_record_cannot_be_deleted(
+    login_as: LoginAs, use_task: Callable[[Any], None], router_wait: SimpleNamespace
+):
+    use_task(tasks.gated_task)
+    router_wait.seconds = 0.2
+    alice = await login_as()
+    task_id = (await alice.client.post("/simulation", json=simulation_payload())).json()["task_id"]
+
+    r = await alice.client.delete(f"/simulation/{task_id}")
+
+    assert r.status_code == 404
+    assert await job_ids(alice) == [task_id]  # still pending; deleting did not abort it
 
 
 # --- the real simulator ---------------------------------------------------------------------------

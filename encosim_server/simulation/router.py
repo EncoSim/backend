@@ -3,12 +3,7 @@ from fastapi import APIRouter
 from encosim_server.core import errors
 from encosim_server.depends import ActiveUserDep, ResourcesDep
 from encosim_server.simulation.manager import SimulationManager
-from encosim_server.simulation.schemas import (
-    SimulationConfig,
-    SimulationList,
-    SimulationRecord,
-    SimulationResult,
-)
+from encosim_server.simulation.schemas import SimulationConfig, SimulationEntry
 
 router = APIRouter(prefix="/simulation", tags=["simulations"])
 
@@ -25,7 +20,9 @@ COMMON = (errors.Unauthorized,)
 )
 async def simulate(
     res: ResourcesDep, user: ActiveUserDep, config: SimulationConfig
-) -> SimulationResult:
+) -> SimulationEntry:
+    """Start a simulation. Short simulations are answered with their result directly,
+    otherwise the response is `pending` and the simulation can be polled by its `task_id`."""
     if config.repetitions > res.settings.max_simulation_repetitions:
         raise errors.TooManyRepetitions(
             detail=errors.AllowedNumberDetail(allowed=res.settings.max_simulation_repetitions)
@@ -39,50 +36,33 @@ async def simulate(
 
 
 @router.get("", responses=errors.to_responses(*COMMON))
-async def job_list(res: ResourcesDep, user: ActiveUserDep) -> SimulationList:
-    return SimulationList(ids=await res.simulations.list_pending(user.user_id))
-
-
-# Register the static /history path before /{task_id}.
-@router.get("/history", responses=errors.to_responses(*COMMON))
-async def simulation_history(res: ResourcesDep, user: ActiveUserDep) -> list[SimulationRecord]:
-    return await res.simulations.list_finished(user.user_id)
-
-
-@router.get(
-    "/history/{task_id}",
-    responses=errors.to_responses_from(SimulationManager.get_finished, extra=COMMON),
-)
-async def simulation_history_item(
-    task_id: str, res: ResourcesDep, user: ActiveUserDep
-) -> SimulationRecord:
-    return await res.simulations.get_finished(task_id, user.user_id)
-
-
-@router.delete(
-    "/history/{task_id}",
-    responses=errors.to_responses_from(SimulationManager.delete_finished, extra=COMMON),
-)
-async def delete_simulation_history_item(
-    task_id: str, res: ResourcesDep, user: ActiveUserDep
-) -> None:
-    await res.simulations.delete_finished(task_id, user.user_id)
-
-
-COMMON = (errors.Unauthorized,)
+async def list_simulations(res: ResourcesDep, user: ActiveUserDep) -> list[SimulationEntry]:
+    """All simulations of the user, pending and finished, newest first."""
+    return await res.simulations.list_all(user.user_id)
 
 
 @router.get(
     "/{task_id}",
-    responses=errors.to_responses_from(SimulationManager.get_status, extra=COMMON),
+    responses=errors.to_responses_from(SimulationManager.get, extra=COMMON),
 )
-async def job_status(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> SimulationResult:
-    return await res.simulations.get_status(task_id, user.user_id)
+async def get_simulation(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> SimulationEntry:
+    """A single simulation, pending or finished."""
+    return await res.simulations.get(task_id, user.user_id)
 
 
-@router.delete(
-    "/{task_id}",
+@router.post(
+    "/{task_id}/abort",
     responses=errors.to_responses_from(SimulationManager.abort, extra=COMMON),
 )
-async def abort_job(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> None:
+async def abort_simulation(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> None:
+    """Abort a pending simulation. It stays in the list as a failed (aborted) simulation."""
     await res.simulations.abort(task_id, user.user_id)
+
+
+@router.delete(
+    "/{task_id}",
+    responses=errors.to_responses_from(SimulationManager.delete_finished, extra=COMMON),
+)
+async def delete_simulation(task_id: str, res: ResourcesDep, user: ActiveUserDep) -> None:
+    """Delete the record of a finished simulation. Pending simulations have to be aborted first."""
+    await res.simulations.delete_finished(task_id, user.user_id)
