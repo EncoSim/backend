@@ -94,7 +94,6 @@ class SimulationTask(LimitedTask):
         if status == "success":
             summary = str(result)
             error_type = None
-            value = result
         else:
             summary = (
                 "simulation timed out"
@@ -104,14 +103,12 @@ class SimulationTask(LimitedTask):
                 else "critical failure"
             )
             error_type = type(error).__name__ if error is not None else "UnknownError"
-            value = None
 
         finalize_simulation(
             self.app.backend,
             task_id,
             owner_id,
             status=status,
-            result=value,
             summary=summary,
             error_type=error_type,
             limit=self.app.simulation_limiter.settings.max_finished_simulations_per_user,

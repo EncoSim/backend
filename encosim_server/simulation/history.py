@@ -14,7 +14,6 @@ def finalize_simulation(
     owner_id: UUID,
     *,
     status: str,
-    result: Any,
     summary: str,
     error_type: str | None,
     limit: int,
@@ -31,7 +30,6 @@ def finalize_simulation(
         {
             "$set": {
                 "status": status,
-                "result": result,
                 "summary": summary,
                 "error_type": error_type,
                 "finished_at": datetime.now(timezone.utc),

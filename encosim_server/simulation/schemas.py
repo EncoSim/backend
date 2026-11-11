@@ -66,7 +66,6 @@ class SimulationRecord(BaseModel):
     task_id: str = Field(validation_alias="_id")
     config: SimulationConfig
     status: Literal["failed", "success"]
-    result: str | None = None
     summary: str
     error_type: str | None = None
     submitted_at: datetime
