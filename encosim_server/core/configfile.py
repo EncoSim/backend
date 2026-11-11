@@ -36,6 +36,7 @@ class ConfigFileWriter:
 
         content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         reloaded = Settings.model_validate_json(content)
+        assert reloaded == self.settings
         if reloaded != self.settings:
             diffs = [
                 name

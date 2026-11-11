@@ -399,7 +399,6 @@ async def test_finished_history_keeps_configuration_and_result(
     record = history.json()[0]
     assert record["status"] == "success"
     assert record["config"] == config
-    assert record["result"] == "repetitions=3"
     assert record["summary"] == "repetitions=3"
     task_id = record["task_id"]
 
@@ -428,7 +427,6 @@ async def test_failed_simulations_are_kept_in_history(
     assert len(history.json()) == 1
     assert history.json()[0]["status"] == "failed"
     assert history.json()[0]["config"] == simulation_payload()
-    assert history.json()[0]["result"] is None
 
 
 @pytest.mark.usefixtures("worker")

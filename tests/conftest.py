@@ -87,7 +87,7 @@ CONFIG_FILE = Path(
 PINNED_SETTINGS = {
     "session_ttl": timedelta(days=30),
     "max_sessions_per_user": 3,
-    "auto_promote_to_admin": ["admin@example.com"],
+    "auto_promote_to_admin": ("admin@example.com",),
     "cookie_path": "/auth",
     "google_fake_provider": True,
     # simulation limits
