@@ -74,7 +74,11 @@ class ApiError(Exception):
         }
         if cls.detail_model is not None:
             fields["detail"] = (cls.detail_model, Field(description=cls.detail_description))
-        return create_model(f"{cls.__name__}Body", __module__=cls.__module__, **fields)
+        return create_model(
+            f"{cls.__name__}ApiErrorModel",  # this may is filtered for by TS
+            __module__=cls.__module__,
+            **fields,
+        )
 
     def __init__(
         self,
