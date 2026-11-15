@@ -125,6 +125,14 @@ async def terminate_all_sessions(
     status_code=204,
     responses=errors.to_responses(*COMMON, errors.NotFound),
 )
-async def terminate_session(res: ResourcesDep, session_id: UUID4, user: ActiveUserDep):
+async def terminate_session(
+    request: Request,
+    response: Response,
+    res: ResourcesDep,
+    session_id: UUID4,
+    user: ActiveUserDep,
+):
     if not await res.sessions.terminate_for_user(user.user_id, session_id):
         raise errors.NotFound()
+    if user.session_id == session_id:
+        clear_refresh_cookie(request, response)
