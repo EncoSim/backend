@@ -136,7 +136,9 @@ async def test_refresh_rotates_the_cookie_and_returns_a_new_access_token(
     assert new_cookie and new_cookie != old_cookie
     # the new access token belongs to the same session: it is still listed
     sessions = await client.get("/auth/sessions", headers=bearer(r))
-    assert len(sessions.json()["sessions"]) == 1
+    body = sessions.json()
+    assert body["current"]["session_id"]
+    assert body["other"] == []
 
 
 async def test_refresh_can_be_repeated(client: AsyncClient):
@@ -243,10 +245,12 @@ async def test_sessions_lists_every_login_without_secrets(make_client: MakeClien
     r = await firefox.get("/auth/sessions", headers=bearer(second))
 
     assert r.status_code == 200
-    sessions = r.json()["sessions"]
+    body = r.json()
+    current, other = body["current"], body["other"]
+    sessions = [current, *other]
     assert len(sessions) == 2
-    assert any("Chrome" in s["info"] for s in sessions)
-    assert any("Firefox" in s["info"] for s in sessions)
+    assert "Firefox" in current["info"]  # the requesting browser's session
+    assert len(other) == 1 and "Chrome" in other[0]["info"]
     assert all(set(s) == {"session_id", "info", "last_used_at", "expires_at"} for s in sessions)
 
 
@@ -257,25 +261,27 @@ async def test_sessions_only_lists_the_users_own(make_client: MakeClient):
 
     r = await alice.get("/auth/sessions", headers=bearer(alice_login))
 
-    assert len(r.json()["sessions"]) == 1
+    body = r.json()
+    assert body["current"]["session_id"]
+    assert body["other"] == []
 
 
 async def test_terminate_one_session_keeps_the_others(make_client: MakeClient, settings: Settings):
     chrome, firefox = make_client(), make_client()
     first = await login(chrome, user_agent=CHROME_WIN)
     await login(firefox, user_agent=FIREFOX_LINUX)
-    listed = (await chrome.get("/auth/sessions", headers=bearer(first))).json()["sessions"]
-    firefox_id = next(s["session_id"] for s in listed if "Firefox" in s["info"])
+    listed = (await chrome.get("/auth/sessions", headers=bearer(first))).json()
+    firefox_id = next(s["session_id"] for s in listed["other"] if "Firefox" in s["info"])
     firefox_token = firefox.cookies.get(REFRESH_COOKIE_NAME)
     assert firefox_token
 
     r = await chrome.delete(f"/auth/sessions/{firefox_id}", headers=bearer(first))
 
     assert r.status_code == 204
-    remaining = (await chrome.get("/auth/sessions", headers=bearer(first))).json()["sessions"]
-    assert len(remaining) == 1
-    assert remaining[0]["session_id"] != firefox_id
-    assert "Chrome" in remaining[0]["info"]
+    remaining = (await chrome.get("/auth/sessions", headers=bearer(first))).json()
+    assert remaining["other"] == []
+    assert remaining["current"]["session_id"] != firefox_id
+    assert "Chrome" in remaining["current"]["info"]
     assert (await firefox.post("/auth/refresh")).status_code == 401  # that browser is logged out
 
 
@@ -294,14 +300,15 @@ async def test_terminate_session_of_another_user_is_not_found(
     alice, bob = make_client(), make_client()
     alice_login = await login(alice, "alice")
     bob_login = await login(bob, "bob")
-    bobs_session = (await bob.get("/auth/sessions", headers=bearer(bob_login))).json()["sessions"][
-        0
-    ]["session_id"]
+    bobs_session = (await bob.get("/auth/sessions", headers=bearer(bob_login))).json()["current"][
+        "session_id"
+    ]
 
     r = await alice.delete(f"/auth/sessions/{bobs_session}", headers=bearer(alice_login))
 
     assert r.status_code == 404
-    assert len((await bob.get("/auth/sessions", headers=bearer(bob_login))).json()["sessions"]) == 1
+    bob_sessions = (await bob.get("/auth/sessions", headers=bearer(bob_login))).json()
+    assert bob_sessions["other"] == []
 
 
 async def test_terminate_session_with_a_malformed_id_is_a_validation_error(client: AsyncClient):
