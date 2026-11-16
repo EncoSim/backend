@@ -244,7 +244,7 @@ async def test_delete_removes_simulations_and_their_celery_results_but_nobody_el
     bob: UserInDB,
 ):
     limiter = resources.celery.simulation_limiter
-    backend = resources.celery.backend
+    backend: Any = resources.celery.backend  # celery is not typed
     finished = limiter.new_task_id(alice.user_id)
     running = await limiter.acquire(alice.user_id)  # holds one of alice's slots
     assert running
@@ -257,13 +257,18 @@ async def test_delete_removes_simulations_and_their_celery_results_but_nobody_el
         ]
     )
     for task_id in (finished, bobs):
-        backend.mark_as_done(task_id, "done")  # type: ignore - celery is not typed
+        backend.mark_as_done(task_id, "done")
 
     assert await users.delete(alice.user_id) is True
 
     assert await db[SIMULATIONS].count_documents({"owner_id": alice.user_id}) == 0
     assert await limiter.active(alice.user_id) == set()
     assert backend.get_state(finished) == "PENDING"  # forgotten: celery knows nothing anymore
+    # A result without a corresponding simulation document is still user data.
+    orphan = limiter.new_task_id(alice.user_id)
+    backend.mark_as_done(orphan, "orphaned result")
+    await users.delete(alice.user_id)  # repeated deletion still sweeps orphan metadata
+    assert backend.get_state(orphan) == "PENDING"
     assert await db[SIMULATIONS].count_documents({"_id": bobs}) == 1
     assert backend.get_state(bobs) == "SUCCESS"
 
@@ -306,11 +311,19 @@ async def test_delete_goes_on_when_simulations_cannot_be_aborted(
 
     monkeypatch.setattr(resources.celery.control, "revoke", broker_is_down)
 
-    assert await users.delete(alice.user_id) is True
+    with pytest.raises(RuntimeError, match="Could not abort running simulations"):
+        await users.delete(alice.user_id)
 
-    assert await users.get(alice.user_id) is None
+    # Do not claim deletion succeeded while a worker may still write a result.
+    assert await users.get(alice.user_id) is not None
     assert await db[SIMULATIONS].count_documents({"owner_id": alice.user_id}) == 0
-    assert await limiter.active(alice.user_id) == set()  # the slot does not stay occupied
+    assert await limiter.active(alice.user_id) == {running}
+
+    # Once the broker is reachable, retrying completes deletion.
+    monkeypatch.setattr(resources.celery.control, "revoke", lambda *_args, **_kwargs: None)
+    assert await users.delete(alice.user_id) is True
+    assert await users.get(alice.user_id) is None
+    assert await limiter.active(alice.user_id) == set()
 
 
 async def test_delete_unknown_user(users: UserManager):

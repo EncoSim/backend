@@ -1,5 +1,4 @@
 import sys
-from datetime import timedelta
 
 from celery import Celery, Task
 
@@ -36,7 +35,7 @@ def create_celery(settings: Settings) -> PatchedCelery:
         task_track_started=True,
         task_soft_time_limit=int(settings.celery_soft_timeout.total_seconds()),
         task_time_limit=int(settings.celery_hard_timeout.total_seconds()),
-        result_expires=timedelta(days=7),  # purge orphans at some point (datenschutz)
+        result_expires=None,
     )
     app.simulation_limiter = SimulationLimiter(settings)
     return app

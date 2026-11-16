@@ -271,37 +271,46 @@ class SimulationManager:
         """Abort the user's running simulations and delete everything stored about them.
 
         For a deleted user. The records go first: the hooks of a worker that is being killed only
-        update records that exist, so nothing can bring one back. Aborting is best effort: if the
-        broker cannot be reached, the tasks run to their end and nobody records the outcome.
+        update records that exist, so nothing can bring one back. If the broker cannot be reached,
+        deletion fails rather than claiming success while a task may still write data.
         """
-        task_ids: set[str] = set()
         running: set[str] = set(await self.limiter.active(owner_id))
         cursor = self.records.find({"owner_id": owner_id}, projection={"status": 1})
         async with cursor:
             async for doc in cursor:
-                task_ids.add(doc["_id"])
                 if doc.get("status") not in FINISHED:
                     running.add(doc["_id"])
         await self.records.delete_many({"owner_id": owner_id})
-        task_ids |= running
 
         if running:
             try:
                 await run_in_threadpool(
                     self.celery.control.revoke, list(running), terminate=True, signal="SIGKILL"
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Could not abort the simulations of deleted user %s", owner_id)
+                raise RuntimeError(
+                    f"Could not abort running simulations for deleted user {owner_id}"
+                ) from exc
         for task_id in running:
             self.limiter.release_sync(task_id)
-        await run_in_threadpool(self._forget_results, task_ids)
+        await run_in_threadpool(self._forget_results, owner_id)
 
-    def _forget_results(self, task_ids: set[str]) -> None:
-        for task_id in task_ids:
-            try:
-                self.celery.backend.forget(task_id)  # type: ignore - celery is not typed
-            except Exception:
-                logger.exception("Could not remove Celery result of simulation %s", task_id)
+    def _forget_results(self, owner_id: UUID) -> None:
+        """Remove all Mongo-backed Celery results belonging to this user.
+
+        Task ids are namespaced as ``<user UUID hex>+<random hex>``. Deleting by
+        that namespace also catches orphaned metadata whose simulation row and
+        Redis limiter entry have already disappeared. Errors deliberately bubble
+        up: a failed purge must not be reported as a successful account deletion.
+        """
+        backend = self.celery.backend
+        backend.collection.delete_many(  # type: ignore - MongoBackend-specific collection
+            {"_id": {"$regex": f"^{owner_id.hex}[+]"}}
+        )
+        # Do not let this process serve a cached result after its backing document
+        # has been deleted. Clearing the result cache is safe; it only causes misses.
+        backend._cache.clear()  # type: ignore - Celery backend cache is not typed
 
     async def delete_finished(
         self, task_id: str, owner_id: UUID
