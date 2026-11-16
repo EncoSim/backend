@@ -267,6 +267,42 @@ class SimulationManager:
                 # else: a record without a live task (e.g. a crashed submit); not listed
         return entries
 
+    async def delete_all(self, owner_id: UUID) -> None:
+        """Abort the user's running simulations and delete everything stored about them.
+
+        For a deleted user. The records go first: the hooks of a worker that is being killed only
+        update records that exist, so nothing can bring one back. Aborting is best effort: if the
+        broker cannot be reached, the tasks run to their end and nobody records the outcome.
+        """
+        task_ids: set[str] = set()
+        running: set[str] = set(await self.limiter.active(owner_id))
+        cursor = self.records.find({"owner_id": owner_id}, projection={"status": 1})
+        async with cursor:
+            async for doc in cursor:
+                task_ids.add(doc["_id"])
+                if doc.get("status") not in FINISHED:
+                    running.add(doc["_id"])
+        await self.records.delete_many({"owner_id": owner_id})
+        task_ids |= running
+
+        if running:
+            try:
+                await run_in_threadpool(
+                    self.celery.control.revoke, list(running), terminate=True, signal="SIGKILL"
+                )
+            except Exception:
+                logger.exception("Could not abort the simulations of deleted user %s", owner_id)
+        for task_id in running:
+            self.limiter.release_sync(task_id)
+        await run_in_threadpool(self._forget_results, task_ids)
+
+    def _forget_results(self, task_ids: set[str]) -> None:
+        for task_id in task_ids:
+            try:
+                self.celery.backend.forget(task_id)  # type: ignore - celery is not typed
+            except Exception:
+                logger.exception("Could not remove Celery result of simulation %s", task_id)
+
     async def delete_finished(
         self, task_id: str, owner_id: UUID
     ) -> Annotated[None, errors.Raises[errors.NotFound]]:

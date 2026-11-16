@@ -12,6 +12,7 @@ from encosim_server.core import errors
 from encosim_server.core.security import utcnow
 from encosim_server.core.settings import Settings
 from encosim_server.database import CHARACTERS, TOMBSTONES, USERS
+from encosim_server.simulation.manager import SimulationManager
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import UserProfile
 
@@ -26,11 +27,18 @@ def identity_hash(sub: str, settings: Settings) -> str:
 
 
 class UserManager:
-    def __init__(self, settings: Settings, db: AsyncDatabase[Any], sessions: SessionsManager):
+    def __init__(
+        self,
+        settings: Settings,
+        db: AsyncDatabase[Any],
+        sessions: SessionsManager,
+        simulations: SimulationManager,
+    ):
         self.users = db[USERS]
         self.characters = db[CHARACTERS]
         self.tombstones = db[TOMBSTONES]
         self.sessions = sessions
+        self.simulations = simulations
         self.settings = settings
 
     async def get(self, user_id: UUID) -> UserInDB | None:
@@ -125,13 +133,13 @@ class UserManager:
         return bool(res.matched_count)
 
     async def delete(self, user_id: UUID) -> bool:
-        """Hard-delete the user, their sessions and their characters.
+        """Hard-delete the user, their sessions, characters and simulations.
 
-        A banned user keeps a tombstone (hash of login id + reason)
+        Running simulations are aborted. A banned user keeps a tombstone (hash of login id + reason)
         """
-        # TODO: also delete and terminate all simulations
         await self.sessions.terminate_all_for_user(user_id)
         await self.characters.delete_many({"owner_id": user_id})
+        await self.simulations.delete_all(user_id)
         user = await self.get(user_id)
         if user is None:
             return False

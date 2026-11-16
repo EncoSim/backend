@@ -28,9 +28,9 @@ class Resources:
 
 def build_resources(settings: Settings, google: GoogleVerifier, db: AsyncDatabase[Any]):
     sessions = SessionsManager(settings, db)
-    users = UserManager(settings, db, sessions)
-    auth = AuthManager(settings, google, sessions, users)
-    characters = CharacterManager(settings, db)
     celery = create_celery(settings)
     simulations = SimulationManager(settings, db, celery)
+    users = UserManager(settings, db, sessions, simulations)  # needed to end their simulations
+    auth = AuthManager(settings, google, sessions, users)
+    characters = CharacterManager(settings, db)
     return Resources(settings, google, db, sessions, users, auth, characters, celery, simulations)

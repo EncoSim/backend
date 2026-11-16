@@ -10,7 +10,8 @@ from encosim_server.auth.google import FakeGoogleVerifier
 from encosim_server.auth.sessions import SessionsManager
 from encosim_server.core import errors
 from encosim_server.core.settings import Settings
-from encosim_server.database import CHARACTERS, SESSIONS, TOMBSTONES, USERS
+from encosim_server.database import CHARACTERS, SESSIONS, SIMULATIONS, TOMBSTONES, USERS
+from encosim_server.resources import Resources
 from encosim_server.users.manager import UserManager, identity_hash
 from encosim_server.users.models import UserInDB
 from encosim_server.users.schemas import BanStatus
@@ -233,6 +234,83 @@ async def test_delete_removes_user_sessions_and_characters_but_nobody_elses(
     assert await users.get(bob.user_id) is not None
     assert ids_from_sessions(await sessions.list_user_sessions(bob.user_id)) == {bobs}
     assert await db[CHARACTERS].count_documents({"_id": bobs_character}) == 1
+
+
+async def test_delete_removes_simulations_and_their_celery_results_but_nobody_elses(
+    users: UserManager,
+    resources: Resources,
+    db: AsyncDatabase[Any],
+    alice: UserInDB,
+    bob: UserInDB,
+):
+    limiter = resources.celery.simulation_limiter
+    backend = resources.celery.backend
+    finished = limiter.new_task_id(alice.user_id)
+    running = await limiter.acquire(alice.user_id)  # holds one of alice's slots
+    assert running
+    bobs = limiter.new_task_id(bob.user_id)
+    await db[SIMULATIONS].insert_many(
+        [
+            {"_id": finished, "owner_id": alice.user_id, "status": "success", "summary": "done"},
+            {"_id": running, "owner_id": alice.user_id},  # no status: still pending
+            {"_id": bobs, "owner_id": bob.user_id, "status": "success", "summary": "done"},
+        ]
+    )
+    for task_id in (finished, bobs):
+        backend.mark_as_done(task_id, "done")  # type: ignore - celery is not typed
+
+    assert await users.delete(alice.user_id) is True
+
+    assert await db[SIMULATIONS].count_documents({"owner_id": alice.user_id}) == 0
+    assert await limiter.active(alice.user_id) == set()
+    assert backend.get_state(finished) == "PENDING"  # forgotten: celery knows nothing anymore
+    assert await db[SIMULATIONS].count_documents({"_id": bobs}) == 1
+    assert backend.get_state(bobs) == "SUCCESS"
+
+
+async def test_delete_aborts_the_running_simulations(
+    users: UserManager,
+    resources: Resources,
+    alice: UserInDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    limiter = resources.celery.simulation_limiter
+    running = await limiter.acquire(alice.user_id)
+    assert running
+    await resources.db[SIMULATIONS].insert_one({"_id": running, "owner_id": alice.user_id})
+    revoked: list[tuple[Any, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        resources.celery.control, "revoke", lambda ids, **kw: revoked.append((ids, kw))
+    )
+
+    await users.delete(alice.user_id)
+
+    # SIGKILL: the simulation does not listen to anything else
+    assert revoked == [([running], {"terminate": True, "signal": "SIGKILL"})]
+
+
+async def test_delete_goes_on_when_simulations_cannot_be_aborted(
+    users: UserManager,
+    resources: Resources,
+    db: AsyncDatabase[Any],
+    alice: UserInDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    limiter = resources.celery.simulation_limiter
+    running = await limiter.acquire(alice.user_id)
+    assert running
+    await db[SIMULATIONS].insert_one({"_id": running, "owner_id": alice.user_id})
+
+    def broker_is_down(*_args: Any, **_kwargs: Any):
+        raise ConnectionError("broker is down")
+
+    monkeypatch.setattr(resources.celery.control, "revoke", broker_is_down)
+
+    assert await users.delete(alice.user_id) is True
+
+    assert await users.get(alice.user_id) is None
+    assert await db[SIMULATIONS].count_documents({"owner_id": alice.user_id}) == 0
+    assert await limiter.active(alice.user_id) == set()  # the slot does not stay occupied
 
 
 async def test_delete_unknown_user(users: UserManager):

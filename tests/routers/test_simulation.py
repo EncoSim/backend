@@ -16,6 +16,8 @@ from celery.result import AsyncResult
 from httpx import AsyncClient
 
 from encosim_server.core.settings import Settings
+from encosim_server.database import SIMULATIONS
+from encosim_server.resources import Resources
 from tests import celery_tasks as tasks
 from tests import infra
 from tests.helpers import eventually, is_running, simulation_payload
@@ -528,3 +530,24 @@ async def test_real_simulation_end_to_end(login_as: LoginAs, router_wait: Simple
 
         body = await eventually(lambda: _not_pending(status()), timeout=120, what="simulation")
     assert body["status"] == "success"
+
+
+@pytest.mark.usefixtures("worker")
+async def test_deleting_the_user_aborts_and_removes_their_simulations(
+    login_as: LoginAs,
+    use_task: Callable[[Any], None],
+    router_wait: SimpleNamespace,
+    worker_process: infra.WorkerControl,
+    resources: Resources,
+):
+    use_task(tasks.unkillable_task)
+    router_wait.seconds = 0.5
+    alice = await login_as()
+    task_id = (await alice.client.post("/simulation", json=simulation_payload())).json()["task_id"]
+    pid = await eventually(lambda: running_pid(worker_process, task_id), what="task running")
+
+    assert (await alice.client.delete("/user/profile")).status_code == 200
+
+    await eventually(lambda: not is_running(pid), timeout=5, what="pool process killed")
+    assert await resources.db[SIMULATIONS].count_documents({"owner_id": alice.user.user_id}) == 0
+    assert await resources.celery.simulation_limiter.active(alice.user.user_id) == set()
