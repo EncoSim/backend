@@ -129,6 +129,7 @@ class UserManager:
 
         A banned user keeps a tombstone (hash of login id + reason)
         """
+        # TODO: also delete and terminate all simulations
         await self.sessions.terminate_all_for_user(user_id)
         await self.characters.delete_many({"owner_id": user_id})
         user = await self.get(user_id)
