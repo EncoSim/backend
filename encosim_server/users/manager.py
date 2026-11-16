@@ -82,7 +82,7 @@ class UserManager:
             {"login_hash": login_hash},
             {
                 "$set": {
-                    "profile": profile.model_dump(),
+                    "profile": profile.model_dump(mode="json"),
                     "last_login": now,
                 },
                 "$setOnInsert": {
