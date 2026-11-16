@@ -27,4 +27,5 @@ class SessionSchema(BaseModel):
 
 
 class ManySessionsSchema(BaseModel):
-    sessions: list[SessionSchema]
+    current: SessionSchema
+    other: list[SessionSchema]

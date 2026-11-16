@@ -8,11 +8,7 @@ from encosim_server.auth.cookie import (
     set_refresh_cookie,
 )
 from encosim_server.auth.manager import AuthManager
-from encosim_server.auth.schema import (
-    GoogleLoginInSchema,
-    LoginOutSchema,
-    ManySessionsSchema,
-)
+from encosim_server.auth.schema import GoogleLoginInSchema, LoginOutSchema, ManySessionsSchema
 from encosim_server.core import errors
 from encosim_server.depends import ActiveUserDep, ResourcesDep
 
@@ -96,10 +92,16 @@ COMMON = (errors.InvalidSession, errors.Unauthorized)
 
 @router.get("/sessions", responses=errors.to_responses(*COMMON))
 async def list_sessions(res: ResourcesDep, user: ActiveUserDep) -> ManySessionsSchema:
-    # sensitive information, check again for stale access tokens
-    if not await res.sessions.is_valid(user.user_id, user.session_id):
+    sessions = await res.sessions.list_user_sessions(user.user_id)
+    found = -1
+    for i, s in enumerate(sessions):
+        if s.session_id == user.session_id:
+            found = i
+            break
+    if found < 0:  # sessions are sensitive information, this also catches stale access tokens
         raise errors.InvalidSession()
-    return ManySessionsSchema(sessions=await res.sessions.list_user_sessions(user.user_id))
+    current = sessions.pop(found)
+    return ManySessionsSchema(current=current, other=sessions)
 
 
 @router.delete(
