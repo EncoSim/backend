@@ -35,10 +35,15 @@ class SimulationConfig(BaseModel):
 
     def as_pure_list(self) -> list[list[EntityConfig]]:
         out = []
+        occurences = [0] * len(self.participants)
         for team in self.teams:
             t = []
             for member in team:
-                t.append(self.participants[member])
+                occurences[member] += 1
+                new = self.participants[member].model_copy(deep=True)
+                if occurences[member] > 1:
+                    new.name += f" ({occurences[member]})"
+                t.append(new)
             out.append(t)
         return out
 
