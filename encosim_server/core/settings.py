@@ -74,6 +74,7 @@ class Settings(BaseModel):
     redis_conn: Path
     celery_soft_timeout: timedelta = timedelta(minutes=4)
     celery_hard_timeout: timedelta = timedelta(minutes=5)
+    celery_concurrency: PositiveInt = 2
 
     @classmethod
     def load(cls, config_file: Path | str) -> Self:
